@@ -1,6 +1,7 @@
 package com.groww.smart_watchlist.controller;
 
 import com.groww.smart_watchlist.dto.AddWatchlistItemRequest;
+import com.groww.smart_watchlist.dto.AttentionItemResponse;
 import com.groww.smart_watchlist.dto.CreateWatchlistRequest;
 import com.groww.smart_watchlist.dto.DetectedChangeResponse;
 import com.groww.smart_watchlist.dto.SnapshotDiffResponse;
@@ -73,6 +74,18 @@ public class WatchlistController {
             @PathVariable Integer watchlistId,
             @RequestParam Integer userId) {
         return watchlistService.detectChanges(watchlistId, userId);
+    }
+
+    // The actual "what deserves my attention" digest — meaningful changes
+    // only, highest severity first. Built on top of detectChanges(); see
+    // WatchlistService.getAttentionItems for why this can't disagree with
+    // /detect. Returns [] (200, not 404/204) when nothing is meaningful —
+    // that's the "everything's normal" case, a normal outcome, not an error.
+    @GetMapping("/{watchlistId}/attention")
+    public List<AttentionItemResponse> getAttentionItems(
+            @PathVariable Integer watchlistId,
+            @RequestParam Integer userId) {
+        return watchlistService.getAttentionItems(watchlistId, userId);
     }
 
     @PostMapping("/{watchlistId}/items")

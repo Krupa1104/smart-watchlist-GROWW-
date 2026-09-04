@@ -1,6 +1,7 @@
 package com.groww.smart_watchlist.service;
 
 import com.groww.smart_watchlist.dto.AddWatchlistItemRequest;
+import com.groww.smart_watchlist.dto.AttentionItemResponse;
 import com.groww.smart_watchlist.dto.DetectedChangeResponse;
 import com.groww.smart_watchlist.dto.MarketDataResponse;
 import com.groww.smart_watchlist.dto.SnapshotDiffResponse;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
 
 @Service
@@ -159,6 +161,27 @@ public class WatchlistService {
 
         return items.stream()
                 .map(item -> changeDetectionService.detect(item.getSymbol(), item.getInstrumentType()))
+                .toList();
+    }
+
+    /**
+     * Phase 4: the actual attention digest. Deliberately just a filter +
+     * sort + reshape on top of detectChanges() — no new detection logic,
+     * no second SQL pass. Reuses the exact same ChangeDetectionService
+     * output that /detect exposes, so /attention and /detect can never
+     * disagree about what's meaningful; /attention just narrows and ranks
+     * it. Note this inherits detectChanges()'s persistence side effect
+     * (meaningful verdicts get written to detected_changes) — same
+     * trade-off /detect already makes, not a new one introduced here.
+     */
+    @Transactional
+    public List<AttentionItemResponse> getAttentionItems(Integer watchlistId, Integer userId) {
+        return detectChanges(watchlistId, userId).stream()
+                .filter(DetectedChangeResponse::meaningful)
+                .sorted(Comparator.comparing(DetectedChangeResponse::severityScore).reversed())
+                .map(r -> new AttentionItemResponse(
+                        r.symbol(), r.instrumentType(), r.asOfDate(), r.changeType(),
+                        r.severityScore(), r.explanation(), r.metrics()))
                 .toList();
     }
 
