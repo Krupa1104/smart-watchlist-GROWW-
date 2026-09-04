@@ -1,6 +1,7 @@
 package com.groww.smart_watchlist.service;
 
 import com.groww.smart_watchlist.dto.AddWatchlistItemRequest;
+import com.groww.smart_watchlist.dto.DetectedChangeResponse;
 import com.groww.smart_watchlist.dto.MarketDataResponse;
 import com.groww.smart_watchlist.dto.SnapshotDiffResponse;
 import com.groww.smart_watchlist.dto.WatchlistItemResponse;
@@ -29,17 +30,20 @@ public class WatchlistService {
     private final UserRepository userRepository;
     private final MarketDataService marketDataService;
     private final SnapshotService snapshotService;
+    private final ChangeDetectionService changeDetectionService;
 
     public WatchlistService(WatchlistRepository watchlistRepository,
                              WatchlistItemRepository watchlistItemRepository,
                              UserRepository userRepository,
                              MarketDataService marketDataService,
-                             SnapshotService snapshotService) {
+                             SnapshotService snapshotService,
+                             ChangeDetectionService changeDetectionService) {
         this.watchlistRepository = watchlistRepository;
         this.watchlistItemRepository = watchlistItemRepository;
         this.userRepository = userRepository;
         this.marketDataService = marketDataService;
         this.snapshotService = snapshotService;
+        this.changeDetectionService = changeDetectionService;
     }
 
     @Transactional
@@ -137,6 +141,24 @@ public class WatchlistService {
                             marketDataService.getLatestMarketData(item.getSymbol(), item.getInstrumentType());
                     return snapshotService.recordCheck(item, marketData);
                 })
+                .toList();
+    }
+
+    /**
+     * Runs detection for every item on the watchlist independently — this
+     * is deliberately NOT tied to checkWatchlist()/snapshots. Detection
+     * compares a symbol against its own history (stocks) or category peers
+     * (funds), which has nothing to do with what this particular user last
+     * saw. Phase 4's digest endpoint will combine this with checkWatchlist()
+     * output to decide what to actually show the user.
+     */
+    @Transactional
+    public List<DetectedChangeResponse> detectChanges(Integer watchlistId, Integer userId) {
+        loadOwnedWatchlist(watchlistId, userId);
+        List<WatchlistItem> items = watchlistItemRepository.findByWatchlistId(watchlistId);
+
+        return items.stream()
+                .map(item -> changeDetectionService.detect(item.getSymbol(), item.getInstrumentType()))
                 .toList();
     }
 

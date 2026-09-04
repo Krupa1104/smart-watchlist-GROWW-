@@ -2,6 +2,7 @@ package com.groww.smart_watchlist.controller;
 
 import com.groww.smart_watchlist.dto.AddWatchlistItemRequest;
 import com.groww.smart_watchlist.dto.CreateWatchlistRequest;
+import com.groww.smart_watchlist.dto.DetectedChangeResponse;
 import com.groww.smart_watchlist.dto.SnapshotDiffResponse;
 import com.groww.smart_watchlist.dto.WatchlistItemResponse;
 import com.groww.smart_watchlist.dto.WatchlistResponse;
@@ -60,6 +61,18 @@ public class WatchlistController {
             @PathVariable Integer watchlistId,
             @RequestParam Integer userId) {
         return watchlistService.checkWatchlist(watchlistId, userId);
+    }
+
+    // Runs detection independently of check-in/snapshots — see
+    // WatchlistService.detectChanges for why. Returns EVERY item, meaningful
+    // or not, including the raw metrics behind each verdict — useful for
+    // validating thresholds against events.json before Phase 4 filters this
+    // down to "only what's meaningful" for the actual digest.
+    @GetMapping("/{watchlistId}/detect")
+    public List<DetectedChangeResponse> detectChanges(
+            @PathVariable Integer watchlistId,
+            @RequestParam Integer userId) {
+        return watchlistService.detectChanges(watchlistId, userId);
     }
 
     @PostMapping("/{watchlistId}/items")
