@@ -1,0 +1,102 @@
+[
+  {
+    "day": 20,
+    "symbol": "STK07",
+    "scope": "stock",
+    "type": "earnings_beat",
+    "price_shock": 0.09,
+    "volume_mult": 3.5,
+    "description": "Everest IT beats Q1 earnings estimates",
+    "date": "2026-03-30"
+  },
+  {
+    "day": 34,
+    "symbol": "STK14",
+    "scope": "stock",
+    "type": "earnings_miss",
+    "price_shock": -0.11,
+    "volume_mult": 4.0,
+    "description": "Vantage Pharma misses Q1 estimates, cuts guidance",
+    "date": "2026-04-17"
+  },
+  {
+    "day": 48,
+    "symbol": "STK03",
+    "scope": "stock",
+    "type": "regulatory_action",
+    "price_shock": -0.15,
+    "volume_mult": 5.0,
+    "description": "Regulator fines Vertex Banking over compliance lapse",
+    "date": "2026-05-07"
+  },
+  {
+    "day": 60,
+    "symbol": "IT",
+    "scope": "sector",
+    "type": "sector_rally",
+    "price_shock": 0.06,
+    "volume_mult": 2.2,
+    "description": "IT sector rallies on strong global tech demand outlook",
+    "date": "2026-05-25"
+  },
+  {
+    "day": 72,
+    "symbol": "STK28",
+    "scope": "stock",
+    "type": "insider_buying",
+    "price_shock": 0.05,
+    "volume_mult": 2.6,
+    "description": "Promoter increases stake in Onyx Energy",
+    "date": "2026-06-10"
+  },
+  {
+    "day": 85,
+    "symbol": "Energy",
+    "scope": "sector",
+    "type": "sector_selloff",
+    "price_shock": -0.07,
+    "volume_mult": 2.8,
+    "description": "Energy sector slides on falling crude oil prices",
+    "date": "2026-06-29"
+  },
+  {
+    "day": 95,
+    "symbol": "STK32",
+    "scope": "stock",
+    "type": "product_launch",
+    "price_shock": 0.07,
+    "volume_mult": 2.4,
+    "description": "Solstice FMCG unveils new flagship product line",
+    "date": "2026-07-13"
+  },
+  {
+    "day": 40,
+    "symbol": "FUND04",
+    "scope": "fund",
+    "type": "manager_change",
+    "price_shock": 0.0,
+    "volume_mult": 1.0,
+    "description": "Fund manager transition announced for Legacy Mid Cap Fund",
+    "date": "2026-04-27"
+  },
+  {
+    "day": 105,
+    "symbol": "FUND10",
+    "scope": "fund",
+    "type": "rating_upgrade",
+    "price_shock": 0.0,
+    "volume_mult": 1.0,
+    "description": "Fusion Debt Fund upgraded to 5-star rating by ratings agency",
+    "date": "2026-07-27"
+  },
+  {
+    "day": 110,
+    "symbol": "STK19",
+    "scope": "stock",
+    "type": "guidance_cut",
+    "price_shock": -0.08,
+    "volume_mult": 3.0,
+    "description": "Falcon Auto lowers full-year revenue guidance",
+    "date": "2026-08-03"
+  }
+]

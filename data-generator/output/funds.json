@@ -1,0 +1,152 @@
+[
+  {
+    "symbol": "FUND01",
+    "name": "Odyssey Large Cap Fund",
+    "category": "Large Cap",
+    "base_nav": 201.95,
+    "daily_vol": 0.005435,
+    "drift": 0.00017,
+    "category_beta": 0.96,
+    "expense_ratio": 0.74
+  },
+  {
+    "symbol": "FUND02",
+    "name": "Nexus Large Cap Fund",
+    "category": "Large Cap",
+    "base_nav": 154.04,
+    "daily_vol": 0.007785,
+    "drift": 0.000225,
+    "category_beta": 0.82,
+    "expense_ratio": 1.28
+  },
+  {
+    "symbol": "FUND03",
+    "name": "Momentum Large Cap Fund",
+    "category": "Large Cap",
+    "base_nav": 72.03,
+    "daily_vol": 0.005474,
+    "drift": 6.9e-05,
+    "category_beta": 0.89,
+    "expense_ratio": 0.79
+  },
+  {
+    "symbol": "FUND04",
+    "name": "Legacy Mid Cap Fund",
+    "category": "Mid Cap",
+    "base_nav": 114.69,
+    "daily_vol": 0.007519,
+    "drift": 0.000216,
+    "category_beta": 0.71,
+    "expense_ratio": 1.94
+  },
+  {
+    "symbol": "FUND05",
+    "name": "Keystone Mid Cap Fund",
+    "category": "Mid Cap",
+    "base_nav": 389.64,
+    "daily_vol": 0.007519,
+    "drift": 1.9e-05,
+    "category_beta": 0.93,
+    "expense_ratio": 0.76
+  },
+  {
+    "symbol": "FUND06",
+    "name": "Jasper Mid Cap Fund",
+    "category": "Mid Cap",
+    "base_nav": 76.89,
+    "daily_vol": 0.01141,
+    "drift": 0.000186,
+    "category_beta": 0.84,
+    "expense_ratio": 1.73
+  },
+  {
+    "symbol": "FUND07",
+    "name": "Indigo Small Cap Fund",
+    "category": "Small Cap",
+    "base_nav": 367.22,
+    "daily_vol": 0.011638,
+    "drift": -5.2e-05,
+    "category_beta": 0.82,
+    "expense_ratio": 1.12
+  },
+  {
+    "symbol": "FUND08",
+    "name": "Helix Small Cap Fund",
+    "category": "Small Cap",
+    "base_nav": 220.82,
+    "daily_vol": 0.015139,
+    "drift": 0.000237,
+    "category_beta": 1.09,
+    "expense_ratio": 0.57
+  },
+  {
+    "symbol": "FUND09",
+    "name": "Genesis Small Cap Fund",
+    "category": "Small Cap",
+    "base_nav": 193.13,
+    "daily_vol": 0.012605,
+    "drift": 0.000331,
+    "category_beta": 0.72,
+    "expense_ratio": 0.72
+  },
+  {
+    "symbol": "FUND10",
+    "name": "Fusion Debt Fund",
+    "category": "Debt",
+    "base_nav": 212.9,
+    "daily_vol": 0.001516,
+    "drift": 3.9e-05,
+    "category_beta": 0.72,
+    "expense_ratio": 1.97
+  },
+  {
+    "symbol": "FUND11",
+    "name": "Echo Debt Fund",
+    "category": "Debt",
+    "base_nav": 210.55,
+    "daily_vol": 0.001846,
+    "drift": 0.000175,
+    "category_beta": 0.63,
+    "expense_ratio": 2.1
+  },
+  {
+    "symbol": "FUND12",
+    "name": "Delta Debt Fund",
+    "category": "Debt",
+    "base_nav": 379.49,
+    "daily_vol": 0.001927,
+    "drift": 0.000363,
+    "category_beta": 1.02,
+    "expense_ratio": 0.68
+  },
+  {
+    "symbol": "FUND13",
+    "name": "Cobalt Hybrid Fund",
+    "category": "Hybrid",
+    "base_nav": 228.83,
+    "daily_vol": 0.004534,
+    "drift": 0.000101,
+    "category_beta": 0.63,
+    "expense_ratio": 1.04
+  },
+  {
+    "symbol": "FUND14",
+    "name": "Bastion Hybrid Fund",
+    "category": "Hybrid",
+    "base_nav": 443.68,
+    "daily_vol": 0.004663,
+    "drift": 0.000292,
+    "category_beta": 0.83,
+    "expense_ratio": 1.12
+  },
+  {
+    "symbol": "FUND15",
+    "name": "Axiom Hybrid Fund",
+    "category": "Hybrid",
+    "base_nav": 431.65,
+    "daily_vol": 0.006489,
+    "drift": 0.000178,
+    "category_beta": 0.96,
+    "expense_ratio": 0.66
+  }
+]

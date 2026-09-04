@@ -1,0 +1,326 @@
+[
+  {
+    "symbol": "STK01",
+    "name": "Alpha Banking",
+    "sector": "Banking",
+    "listing_price": 2292.08,
+    "daily_vol": 0.01071,
+    "drift": -2.5e-05,
+    "sector_beta": 0.68
+  },
+  {
+    "symbol": "STK02",
+    "name": "Zenith Banking",
+    "sector": "Banking",
+    "listing_price": 2617.18,
+    "daily_vol": 0.01618,
+    "drift": 0.000592,
+    "sector_beta": 0.57
+  },
+  {
+    "symbol": "STK03",
+    "name": "Vertex Banking",
+    "sector": "Banking",
+    "listing_price": 1563.44,
+    "daily_vol": 0.01075,
+    "drift": -8.1e-05,
+    "sector_beta": 0.9
+  },
+  {
+    "symbol": "STK04",
+    "name": "Orion Banking",
+    "sector": "Banking",
+    "listing_price": 238.9,
+    "daily_vol": 0.01217,
+    "drift": 0.00035,
+    "sector_beta": 0.94
+  },
+  {
+    "symbol": "STK05",
+    "name": "Nova Banking",
+    "sector": "Banking",
+    "listing_price": 888.48,
+    "daily_vol": 0.01545,
+    "drift": 0.000509,
+    "sector_beta": 0.51
+  },
+  {
+    "symbol": "STK06",
+    "name": "Sterling Banking",
+    "sector": "Banking",
+    "listing_price": 2849.49,
+    "daily_vol": 0.01636,
+    "drift": 4e-05,
+    "sector_beta": 0.62
+  },
+  {
+    "symbol": "STK07",
+    "name": "Everest IT",
+    "sector": "IT",
+    "listing_price": 3356.66,
+    "daily_vol": 0.01523,
+    "drift": -0.000207,
+    "sector_beta": 0.58
+  },
+  {
+    "symbol": "STK08",
+    "name": "Pioneer IT",
+    "sector": "IT",
+    "listing_price": 2989.11,
+    "daily_vol": 0.0178,
+    "drift": 0.000507,
+    "sector_beta": 1.08
+  },
+  {
+    "symbol": "STK09",
+    "name": "Horizon IT",
+    "sector": "IT",
+    "listing_price": 1946.36,
+    "daily_vol": 0.02134,
+    "drift": 7.9e-05,
+    "sector_beta": 0.94
+  },
+  {
+    "symbol": "STK10",
+    "name": "Summit IT",
+    "sector": "IT",
+    "listing_price": 2928.51,
+    "daily_vol": 0.01794,
+    "drift": 0.000562,
+    "sector_beta": 0.96
+  },
+  {
+    "symbol": "STK11",
+    "name": "Meridian IT",
+    "sector": "IT",
+    "listing_price": 2510.32,
+    "daily_vol": 0.01244,
+    "drift": -7.2e-05,
+    "sector_beta": 0.73
+  },
+  {
+    "symbol": "STK12",
+    "name": "Crest IT",
+    "sector": "IT",
+    "listing_price": 417.3,
+    "daily_vol": 0.01423,
+    "drift": -0.000199,
+    "sector_beta": 0.72
+  },
+  {
+    "symbol": "STK13",
+    "name": "Atlas Pharma",
+    "sector": "Pharma",
+    "listing_price": 2279.54,
+    "daily_vol": 0.01744,
+    "drift": 7e-05,
+    "sector_beta": 0.67
+  },
+  {
+    "symbol": "STK14",
+    "name": "Vantage Pharma",
+    "sector": "Pharma",
+    "listing_price": 1044.38,
+    "daily_vol": 0.02362,
+    "drift": 0.000348,
+    "sector_beta": 0.99
+  },
+  {
+    "symbol": "STK15",
+    "name": "Beacon Pharma",
+    "sector": "Pharma",
+    "listing_price": 723.31,
+    "daily_vol": 0.02137,
+    "drift": -0.000137,
+    "sector_beta": 0.8
+  },
+  {
+    "symbol": "STK16",
+    "name": "Catalyst Pharma",
+    "sector": "Pharma",
+    "listing_price": 3464.9,
+    "daily_vol": 0.02041,
+    "drift": 0.000257,
+    "sector_beta": 1.05
+  },
+  {
+    "symbol": "STK17",
+    "name": "Cascade Pharma",
+    "sector": "Pharma",
+    "listing_price": 2973.55,
+    "daily_vol": 0.02188,
+    "drift": -7.1e-05,
+    "sector_beta": 0.53
+  },
+  {
+    "symbol": "STK18",
+    "name": "Ember Pharma",
+    "sector": "Pharma",
+    "listing_price": 1206.77,
+    "daily_vol": 0.01639,
+    "drift": -8.9e-05,
+    "sector_beta": 1.25
+  },
+  {
+    "symbol": "STK19",
+    "name": "Falcon Auto",
+    "sector": "Auto",
+    "listing_price": 3085.83,
+    "daily_vol": 0.01596,
+    "drift": 0.000355,
+    "sector_beta": 0.82
+  },
+  {
+    "symbol": "STK20",
+    "name": "Granite Auto",
+    "sector": "Auto",
+    "listing_price": 3213.73,
+    "daily_vol": 0.01743,
+    "drift": -3.5e-05,
+    "sector_beta": 0.7
+  },
+  {
+    "symbol": "STK21",
+    "name": "Harbor Auto",
+    "sector": "Auto",
+    "listing_price": 2030.58,
+    "daily_vol": 0.01543,
+    "drift": 0.000285,
+    "sector_beta": 1.22
+  },
+  {
+    "symbol": "STK22",
+    "name": "Ignite Auto",
+    "sector": "Auto",
+    "listing_price": 1487.99,
+    "daily_vol": 0.01499,
+    "drift": 0.000698,
+    "sector_beta": 0.91
+  },
+  {
+    "symbol": "STK23",
+    "name": "Juniper Auto",
+    "sector": "Auto",
+    "listing_price": 454.55,
+    "daily_vol": 0.01323,
+    "drift": -0.00019,
+    "sector_beta": 1.0
+  },
+  {
+    "symbol": "STK24",
+    "name": "Kinetic Auto",
+    "sector": "Auto",
+    "listing_price": 2803.47,
+    "daily_vol": 0.01706,
+    "drift": -0.000236,
+    "sector_beta": 0.81
+  },
+  {
+    "symbol": "STK25",
+    "name": "Luminous Energy",
+    "sector": "Energy",
+    "listing_price": 3487.01,
+    "daily_vol": 0.02135,
+    "drift": 0.000671,
+    "sector_beta": 1.19
+  },
+  {
+    "symbol": "STK26",
+    "name": "Monarch Energy",
+    "sector": "Energy",
+    "listing_price": 188.46,
+    "daily_vol": 0.02365,
+    "drift": 0.000382,
+    "sector_beta": 0.93
+  },
+  {
+    "symbol": "STK27",
+    "name": "Nimbus Energy",
+    "sector": "Energy",
+    "listing_price": 1043.86,
+    "daily_vol": 0.02269,
+    "drift": -0.000188,
+    "sector_beta": 0.85
+  },
+  {
+    "symbol": "STK28",
+    "name": "Onyx Energy",
+    "sector": "Energy",
+    "listing_price": 1669.97,
+    "daily_vol": 0.02645,
+    "drift": 0.000576,
+    "sector_beta": 0.71
+  },
+  {
+    "symbol": "STK29",
+    "name": "Prism Energy",
+    "sector": "Energy",
+    "listing_price": 1826.96,
+    "daily_vol": 0.01714,
+    "drift": 0.000613,
+    "sector_beta": 1.2
+  },
+  {
+    "symbol": "STK30",
+    "name": "Quantum Energy",
+    "sector": "Energy",
+    "listing_price": 1149.79,
+    "daily_vol": 0.02267,
+    "drift": 0.000309,
+    "sector_beta": 0.62
+  },
+  {
+    "symbol": "STK31",
+    "name": "Radiant FMCG",
+    "sector": "FMCG",
+    "listing_price": 2704.41,
+    "daily_vol": 0.01181,
+    "drift": 0.000479,
+    "sector_beta": 0.92
+  },
+  {
+    "symbol": "STK32",
+    "name": "Solstice FMCG",
+    "sector": "FMCG",
+    "listing_price": 151.92,
+    "daily_vol": 0.01039,
+    "drift": -0.000281,
+    "sector_beta": 1.24
+  },
+  {
+    "symbol": "STK33",
+    "name": "Tandem FMCG",
+    "sector": "FMCG",
+    "listing_price": 3093.72,
+    "daily_vol": 0.01374,
+    "drift": 8e-06,
+    "sector_beta": 0.55
+  },
+  {
+    "symbol": "STK34",
+    "name": "Unity FMCG",
+    "sector": "FMCG",
+    "listing_price": 3091.33,
+    "daily_vol": 0.0145,
+    "drift": -0.000214,
+    "sector_beta": 0.89
+  },
+  {
+    "symbol": "STK35",
+    "name": "Vector FMCG",
+    "sector": "FMCG",
+    "listing_price": 381.86,
+    "daily_vol": 0.01327,
+    "drift": 0.000466,
+    "sector_beta": 0.6
+  },
+  {
+    "symbol": "STK36",
+    "name": "Wavelength FMCG",
+    "sector": "FMCG",
+    "listing_price": 1742.2,
+    "daily_vol": 0.01188,
+    "drift": -3.5e-05,
+    "sector_beta": 1.2
+  }
+]
