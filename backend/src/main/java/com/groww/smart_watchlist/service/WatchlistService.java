@@ -197,6 +197,25 @@ public class WatchlistService {
         // so any Phase 2 snapshot row for this item is cleaned up automatically.
     }
 
+    /**
+     * Deletes a watchlist the user owns. watchlist_items and
+     * watchlist_snapshots for it are removed by the database's own
+     * ON DELETE CASCADE (see schema.sql) — stocks/funds/market data and
+     * detected_changes are keyed by symbol, not by watchlist, so they are
+     * never touched by this.
+     */
+    @Transactional
+    public void deleteWatchlist(Integer watchlistId, Integer userId) {
+        Watchlist watchlist = loadOwnedWatchlist(watchlistId, userId);
+
+        List<WatchlistItem> items =
+                watchlistItemRepository.findByWatchlistId(watchlistId);
+
+        watchlistItemRepository.deleteAll(items);
+
+        watchlistRepository.delete(watchlist);
+    }
+
     // --- helpers ---
 
     private void ensureUserExists(Integer userId) {

@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
-import WatchlistHeader from './components/WatchlistHeader.jsx';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import AppHeader from './components/AppHeader.jsx';
+import WatchlistTabs from './components/WatchlistTabs.jsx';
+import WatchlistToolbar from './components/WatchlistToolbar.jsx';
 import AttentionSection from './components/AttentionSection.jsx';
 import WatchlistTable from './components/WatchlistTable.jsx';
 import AddItemForm from './components/AddItemForm.jsx';
@@ -9,50 +11,59 @@ import {
   createWatchlist,
   getWatchlist,
   checkWatchlist,
+  detectChanges,
   getAttentionItems,
   addItem,
   removeItem,
+  deleteWatchlist,
 } from './api/watchlistApi.js';
 
 export default function App() {
-  const [watchlistId, setWatchlistId] = useState(null);
+  const [summaries, setSummaries] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
   const [watchlist, setWatchlist] = useState(null);
+  const [detectedItems, setDetectedItems] = useState([]);
   const [attentionItems, setAttentionItems] = useState([]);
 
-  const [loadingWatchlist, setLoadingWatchlist] = useState(true);
-  const [loadingAttention, setLoadingAttention] = useState(true);
+  const [loadingSummaries, setLoadingSummaries] = useState(true);
+  const [loadingWatchlist, setLoadingWatchlist] = useState(false);
+  const [loadingAttention, setLoadingAttention] = useState(false);
+  const [listError, setListError] = useState(null);
   const [watchlistError, setWatchlistError] = useState(null);
   const [attentionError, setAttentionError] = useState(null);
 
+  const [creatingWatchlist, setCreatingWatchlist] = useState(false);
   const [checking, setChecking] = useState(false);
   const [checkSummary, setCheckSummary] = useState(null);
 
+  const [addOpen, setAddOpen] = useState(false);
   const [addSubmitting, setAddSubmitting] = useState(false);
   const [addError, setAddError] = useState(null);
+  const [addSuccess, setAddSuccess] = useState(null);
+  const [prefillSymbol, setPrefillSymbol] = useState('');
+  const [editMode, setEditMode] = useState(false);
   const [removingSymbol, setRemovingSymbol] = useState(null);
+  const [tableSearch, setTableSearch] = useState('');
+  const [deletingWatchlist, setDeletingWatchlist] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
 
-  // --- initial load: find (or offer to create) the demo user's watchlist ---
+  const addSectionRef = useRef(null);
+
+  // --- initial load: fetch the demo user's watchlists ---
   useEffect(() => {
     let cancelled = false;
     async function init() {
-      setLoadingWatchlist(true);
-      setWatchlistError(null);
+      setLoadingSummaries(true);
+      setListError(null);
       try {
-        const summaries = await listWatchlists();
+        const data = await listWatchlists();
         if (cancelled) return;
-        if (summaries.length === 0) {
-          setWatchlistId(null);
-          setLoadingWatchlist(false);
-          setLoadingAttention(false);
-          return;
-        }
-        setWatchlistId(summaries[0].id);
+        setSummaries(data);
+        if (data.length > 0) setSelectedId(data[0].id);
       } catch (err) {
-        if (!cancelled) {
-          setWatchlistError(err.message);
-          setLoadingWatchlist(false);
-          setLoadingAttention(false);
-        }
+        if (!cancelled) setListError(err.message);
+      } finally {
+        if (!cancelled) setLoadingSummaries(false);
       }
     }
     init();
@@ -74,12 +85,20 @@ export default function App() {
     }
   }, []);
 
-  const loadAttention = useCallback(async (id) => {
+  // Pulls BOTH /detect (per-item metrics, incl. non-meaningful ones, used to
+  // show a real 1D change/volume figure for every row) and /attention (the
+  // meaningful-only digest). Both come straight from the backend — nothing
+  // here computes its own "change" number.
+  const loadInsights = useCallback(async (id) => {
     setLoadingAttention(true);
     setAttentionError(null);
     try {
-      const data = await getAttentionItems(id);
-      setAttentionItems(data);
+      const [detected, attention] = await Promise.all([
+        detectChanges(id).catch(() => []), // supplementary; table degrades gracefully if this fails
+        getAttentionItems(id),
+      ]);
+      setDetectedItems(detected);
+      setAttentionItems(attention);
     } catch (err) {
       setAttentionError(err.message);
     } finally {
@@ -87,45 +106,49 @@ export default function App() {
     }
   }, []);
 
-  // Ordinary data load — fires once we know the watchlist id, and whenever
-  // it changes. This never calls /check: viewing the page must not silently
-  // move the user's "last seen" baseline.
+  // Ordinary data load — never calls /check. Viewing the page must not move
+  // the user's "last seen" baseline.
   useEffect(() => {
-    if (watchlistId == null) return;
-    loadWatchlist(watchlistId);
-    loadAttention(watchlistId);
-  }, [watchlistId, loadWatchlist, loadAttention]);
+    if (selectedId == null) return;
+    setEditMode(false);
+    setTableSearch('');
+    setDeleteError(null);
+    loadWatchlist(selectedId);
+    loadInsights(selectedId);
+  }, [selectedId, loadWatchlist, loadInsights]);
 
   async function handleCreateWatchlist() {
-    setLoadingWatchlist(true);
-    setWatchlistError(null);
+    setCreatingWatchlist(true);
+    setListError(null);
     try {
       const created = await createWatchlist();
-      setWatchlistId(created.id);
+      setSummaries((prev) => [...prev, { ...created, itemCount: 0 }]);
+      setSelectedId(created.id);
     } catch (err) {
-      setWatchlistError(err.message);
-      setLoadingWatchlist(false);
+      setListError(err.message);
+    } finally {
+      setCreatingWatchlist(false);
     }
   }
 
-  // The explicit, deliberate "I'm checking now" action. Diffs against the
-  // stored snapshot and updates it — only ever triggered by this button.
+  // The explicit, deliberate "I'm checking now" action.
   async function handleCheck() {
-    if (watchlistId == null) return;
+    if (selectedId == null) return;
     setChecking(true);
     setCheckSummary(null);
     try {
-      const diffs = await checkWatchlist(watchlistId);
+      const diffs = await checkWatchlist(selectedId);
       const movedCount = diffs.filter(
         (d) => !d.firstView && d.dataAvailable && d.previousValue !== d.currentValue
       ).length;
       setCheckSummary(
-        diffs.every((d) => d.firstView)
+        diffs.length === 0
+          ? 'Nothing on this watchlist to check yet.'
+          : diffs.every((d) => d.firstView)
           ? 'Baseline recorded — next check will show what changed.'
           : `Checked ${diffs.length} instrument${diffs.length === 1 ? '' : 's'}, ${movedCount} moved since last time.`
       );
-      // Re-pull attention so "What changed" reflects the freshest detection run too.
-      await loadAttention(watchlistId);
+      await loadInsights(selectedId);
     } catch (err) {
       setCheckSummary(null);
       setAttentionError(err.message);
@@ -135,12 +158,15 @@ export default function App() {
   }
 
   async function handleAddItem(symbol, instrumentType) {
-    if (watchlistId == null) return;
+    if (selectedId == null) return;
     setAddSubmitting(true);
     setAddError(null);
+    setAddSuccess(null);
     try {
-      await addItem(watchlistId, symbol, instrumentType);
-      await Promise.all([loadWatchlist(watchlistId), loadAttention(watchlistId)]);
+      await addItem(selectedId, symbol, instrumentType);
+      setAddSuccess(`${symbol.toUpperCase()} added to your watchlist.`);
+      setPrefillSymbol('');
+      await Promise.all([loadWatchlist(selectedId), loadInsights(selectedId)]);
     } catch (err) {
       setAddError(err.message);
     } finally {
@@ -149,11 +175,11 @@ export default function App() {
   }
 
   async function handleRemoveItem(symbol) {
-    if (watchlistId == null) return;
+    if (selectedId == null) return;
     setRemovingSymbol(symbol);
     try {
-      await removeItem(watchlistId, symbol);
-      await Promise.all([loadWatchlist(watchlistId), loadAttention(watchlistId)]);
+      await removeItem(selectedId, symbol);
+      await Promise.all([loadWatchlist(selectedId), loadInsights(selectedId)]);
     } catch (err) {
       setWatchlistError(err.message);
     } finally {
@@ -161,71 +187,155 @@ export default function App() {
     }
   }
 
+  // Deletes the whole active watchlist. Confirms first (destructive,
+  // unrecoverable), then picks another existing watchlist to show, or falls
+  // back to the existing "no watchlist yet" empty state if that was the
+  // last one — no separate empty state needed, summaries.length === 0
+  // already renders it.
+  async function handleDeleteWatchlist() {
+    if (selectedId == null || !watchlist) return;
+    const confirmed = window.confirm(
+      `Delete "${watchlist.name}"? This can't be undone.`
+    );
+    if (!confirmed) return;
+
+    setDeletingWatchlist(true);
+    setDeleteError(null);
+    try {
+      await deleteWatchlist(selectedId);
+      const remaining = summaries.filter((w) => w.id !== selectedId);
+      setSummaries(remaining);
+      if (remaining.length > 0) {
+        setSelectedId(remaining[0].id);
+      } else {
+        setSelectedId(null);
+        setWatchlist(null);
+        setAttentionItems([]);
+        setDetectedItems([]);
+      }
+    } catch (err) {
+      setDeleteError(err.message);
+    } finally {
+      setDeletingWatchlist(false);
+    }
+  }
+
+  function handleGlobalSearch(query) {
+    setAddOpen(true);
+    setPrefillSymbol(query.toUpperCase());
+    addSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   const attentionSymbols = new Set(attentionItems.map((i) => i.symbol));
-
-  if (loadingWatchlist && watchlistId == null && !watchlistError) {
-    return (
-      <div className="page">
-        <LoadingState label="Finding your watchlist…" />
-      </div>
-    );
-  }
-
-  if (watchlistError && watchlist == null) {
-    return (
-      <div className="page">
-        <ErrorState message={watchlistError} onRetry={() => window.location.reload()} />
-      </div>
-    );
-  }
-
-  if (!loadingWatchlist && watchlistId == null) {
-    return (
-      <div className="page">
-        <EmptyState
-          title="No watchlist yet"
-          message="Create one to start tracking instruments."
-        />
-        <button type="button" className="btn btn--primary" onClick={handleCreateWatchlist}>
-          Create watchlist
-        </button>
-      </div>
-    );
-  }
+  const detectedBySymbol = new Map(detectedItems.map((d) => [d.symbol, d]));
+  const allItems = watchlist?.items ?? [];
+  const filteredItems = tableSearch.trim()
+    ? allItems.filter((item) => {
+        const q = tableSearch.trim().toLowerCase();
+        return (
+          item.symbol.toLowerCase().includes(q) ||
+          item.marketData?.displayName?.toLowerCase().includes(q) ||
+          item.marketData?.groupLabel?.toLowerCase().includes(q)
+        );
+      })
+    : allItems;
 
   return (
-    <div className="page">
-      <WatchlistHeader watchlist={watchlist} onCheck={handleCheck} checking={checking} />
+    <div className="app-shell">
+      <AppHeader onGlobalSearch={handleGlobalSearch} />
 
-      {checkSummary && <p className="check-summary" role="status">{checkSummary}</p>}
+      <main className="page">
+        {loadingSummaries && <LoadingState label="Loading your watchlists…" />}
 
-      <AttentionSection
-        items={attentionItems}
-        loading={loadingAttention}
-        error={attentionError}
-        onRetry={() => loadAttention(watchlistId)}
-      />
-
-      <section className="wl-section" aria-label="All instruments">
-        <h2>All instruments</h2>
-        {loadingWatchlist && <LoadingState label="Loading watchlist…" />}
-        {!loadingWatchlist && watchlistError && (
-          <ErrorState message={watchlistError} onRetry={() => loadWatchlist(watchlistId)} />
+        {!loadingSummaries && listError && (
+          <ErrorState message={listError} onRetry={() => window.location.reload()} />
         )}
-        {!loadingWatchlist && !watchlistError && watchlist && (
-          <WatchlistTable
-            items={watchlist.items}
-            attentionSymbols={attentionSymbols}
-            onRemove={handleRemoveItem}
-            removingSymbol={removingSymbol}
-          />
-        )}
-      </section>
 
-      <section className="wl-section" aria-label="Add instrument">
-        <h2>Add an instrument</h2>
-        <AddItemForm onAdd={handleAddItem} submitting={addSubmitting} error={addError} />
-      </section>
+        {!loadingSummaries && !listError && summaries.length === 0 && (
+          <div className="wl-panel">
+            <EmptyState title="No watchlist yet" message="Create one to start tracking instruments." />
+            <button type="button" className="btn btn--primary" onClick={handleCreateWatchlist}>
+              Create watchlist
+            </button>
+          </div>
+        )}
+
+        {!loadingSummaries && !listError && summaries.length > 0 && (
+          <>
+            <WatchlistTabs
+              watchlists={summaries}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onCreate={handleCreateWatchlist}
+              creating={creatingWatchlist}
+            />
+
+            <AttentionSection
+              items={attentionItems}
+              loading={loadingAttention}
+              error={attentionError}
+              onRetry={() => loadInsights(selectedId)}
+            />
+
+            {checkSummary && (
+              <p className="check-summary" role="status">
+                {checkSummary}
+              </p>
+            )}
+
+            <section className="wl-panel" aria-label="Watchlist">
+              <WatchlistToolbar
+                itemCount={allItems.length}
+                dataAsOf={watchlist?.dataAsOf}
+                search={tableSearch}
+                onSearchChange={setTableSearch}
+                addOpen={addOpen}
+                onToggleAdd={() => setAddOpen((v) => !v)}
+                editMode={editMode}
+                onToggleEdit={() => setEditMode((v) => !v)}
+                onCheck={handleCheck}
+                checking={checking}
+                onDeleteWatchlist={handleDeleteWatchlist}
+                deletingWatchlist={deletingWatchlist}
+              />
+
+              {deleteError && (
+                <p className="wl-panel__error" role="alert">
+                  {deleteError}
+                </p>
+              )}
+
+              {addOpen && (
+                <div className="wl-panel__add" ref={addSectionRef}>
+                  <AddItemForm
+                    onAdd={handleAddItem}
+                    submitting={addSubmitting}
+                    error={addError}
+                    success={addSuccess}
+                    prefillSymbol={prefillSymbol}
+                  />
+                </div>
+              )}
+
+              {loadingWatchlist && <LoadingState label="Loading watchlist…" />}
+              {!loadingWatchlist && watchlistError && (
+                <ErrorState message={watchlistError} onRetry={() => loadWatchlist(selectedId)} />
+              )}
+              {!loadingWatchlist && !watchlistError && watchlist && (
+                <WatchlistTable
+                  items={filteredItems}
+                  totalCount={allItems.length}
+                  attentionSymbols={attentionSymbols}
+                  detectedBySymbol={detectedBySymbol}
+                  editMode={editMode}
+                  onRemove={handleRemoveItem}
+                  removingSymbol={removingSymbol}
+                />
+              )}
+            </section>
+          </>
+        )}
+      </main>
     </div>
   );
 }

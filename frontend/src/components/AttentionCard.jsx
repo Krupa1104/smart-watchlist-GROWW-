@@ -1,40 +1,41 @@
 import { formatSeverity, formatChangeType, formatDate } from '../utils/format.js';
-import { inferDirection } from '../utils/direction.js';
+import { getPercentChange, directionFromPercent } from '../utils/metrics.js';
 
 function severityTier(severity) {
   const num = Number(severity);
   if (Number.isNaN(num)) return 'moderate';
   if (num >= 3) return 'high';
-  if (num >= 2) return 'moderate';
+  if (num >= 1.5) return 'moderate';
   return 'low';
 }
 
+const TIER_LABEL = { high: 'High attention', moderate: 'Attention', low: 'Minor' };
+
 export default function AttentionCard({ item }) {
-  const direction = inferDirection(item.metrics);
+  const pct = getPercentChange(item.metrics, item.instrumentType);
+  const direction = directionFromPercent(pct);
   const tier = severityTier(item.severity);
 
   return (
-    <li className={`attention-card attention-card--${tier}`} data-testid="attention-card">
-      <div className="attention-card__top">
-        <span className="attention-card__symbol">{item.symbol}</span>
-        <span className={`attention-card__badge attention-card__badge--${tier}`}>
-          {tier === 'high' ? 'High attention' : tier === 'moderate' ? 'Worth a look' : 'Minor'}
-        </span>
+    <li className={`attn-card attn-card--${tier}`} data-testid="attention-card">
+      <div className="attn-card__headline">
+        <span className="attn-card__symbol">{item.symbol}</span>
+        {pct !== null && (
+          <span className={`attn-card__pct attn-card__pct--${direction}`}>
+            {direction === 'up' ? '▲' : direction === 'down' ? '▼' : '–'}{' '}
+            {pct > 0 ? '+' : ''}
+            {pct.toFixed(2)}%
+          </span>
+        )}
+        <span className={`attn-card__badge attn-card__badge--${tier}`}>{TIER_LABEL[tier]}</span>
       </div>
 
-      <p className="attention-card__explanation">
-        {direction === 'up' && <span className="glyph glyph--up" aria-hidden="true">▲</span>}
-        {direction === 'down' && <span className="glyph glyph--down" aria-hidden="true">▼</span>}
-        {item.explanation}
+      <p className="attn-card__explanation">{item.explanation}</p>
+
+      <p className="attn-card__meta">
+        {formatChangeType(item.changeType)} · Severity {formatSeverity(item.severity)} ·{' '}
+        {formatDate(item.asOfDate)}
       </p>
-
-      <div className="attention-card__meta">
-        <span>{formatChangeType(item.changeType)}</span>
-        <span aria-hidden="true">·</span>
-        <span>Severity {formatSeverity(item.severity)}</span>
-        <span aria-hidden="true">·</span>
-        <span>{formatDate(item.asOfDate)}</span>
-      </div>
     </li>
   );
 }

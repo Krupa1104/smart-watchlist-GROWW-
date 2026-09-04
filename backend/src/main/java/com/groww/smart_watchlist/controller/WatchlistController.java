@@ -105,4 +105,16 @@ public class WatchlistController {
         watchlistService.removeItem(watchlistId, userId, symbol);
         return ResponseEntity.noContent().build();
     }
+
+    // Deletes the whole watchlist (and, via DB cascade, its items/snapshots
+    // — see WatchlistService.deleteWatchlist). Same ownership check as every
+    // other endpoint here: 404 if the id doesn't exist, 403 if it exists but
+    // belongs to a different userId.
+    @DeleteMapping("/{watchlistId}")
+    public ResponseEntity<Void> deleteWatchlist(
+            @PathVariable Integer watchlistId,
+            @RequestParam Integer userId) {
+        watchlistService.deleteWatchlist(watchlistId, userId);
+        return ResponseEntity.noContent().build();
+    }
 }

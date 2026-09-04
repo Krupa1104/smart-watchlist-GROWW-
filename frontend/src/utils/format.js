@@ -15,6 +15,11 @@ export function formatPercent(value, { withSign = true } = {}) {
   return `${sign}${num.toFixed(2)}%`;
 }
 
+export function formatVolumeRatio(ratio) {
+  if (ratio === null || ratio === undefined) return '—';
+  return `${Number(ratio).toFixed(1)}x avg`;
+}
+
 export function formatSeverity(value) {
   if (value === null || value === undefined) return '—';
   return Number(value).toFixed(2);

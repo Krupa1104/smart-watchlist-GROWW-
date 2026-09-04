@@ -44,3 +44,10 @@ export function addItem(watchlistId, symbol, instrumentType, userId = DEMO_USER_
 export function removeItem(watchlistId, symbol, userId = DEMO_USER_ID) {
   return apiClient.delete(`/api/watchlists/${watchlistId}/items/${symbol}`, { userId });
 }
+
+// Deletes the whole watchlist. The backend cascades this to the
+// watchlist's own items/snapshots at the database level — see
+// backend/.../service/WatchlistService.java.
+export function deleteWatchlist(watchlistId, userId = DEMO_USER_ID) {
+  return apiClient.delete(`/api/watchlists/${watchlistId}`, { userId });
+}

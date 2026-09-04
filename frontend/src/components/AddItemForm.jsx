@@ -1,8 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-export default function AddItemForm({ onAdd, submitting, error }) {
-  const [symbol, setSymbol] = useState('');
+export default function AddItemForm({ onAdd, submitting, error, success, prefillSymbol }) {
+  const [symbol, setSymbol] = useState(prefillSymbol || '');
   const [instrumentType, setInstrumentType] = useState('STOCK');
+
+  useEffect(() => {
+    if (prefillSymbol) setSymbol(prefillSymbol);
+  }, [prefillSymbol]);
 
   function handleSubmit(e) {
     e.preventDefault();
@@ -12,36 +16,47 @@ export default function AddItemForm({ onAdd, submitting, error }) {
   }
 
   return (
-    <form className="add-item-form" onSubmit={handleSubmit} aria-label="Add instrument">
-      <div className="add-item-form__field">
-        <label htmlFor="add-item-type">Type</label>
-        <select
-          id="add-item-type"
-          value={instrumentType}
-          onChange={(e) => setInstrumentType(e.target.value)}
-        >
-          <option value="STOCK">Stock</option>
-          <option value="FUND">Fund</option>
-        </select>
-      </div>
+    <div className="add-item">
+      <form className="add-item__form" onSubmit={handleSubmit} aria-label="Add instrument">
+        <div className="add-item__field">
+          <label htmlFor="add-item-type">Type</label>
+          <select
+            id="add-item-type"
+            value={instrumentType}
+            onChange={(e) => setInstrumentType(e.target.value)}
+          >
+            <option value="STOCK">Stock</option>
+            <option value="FUND">Fund</option>
+          </select>
+        </div>
 
-      <div className="add-item-form__field add-item-form__field--grow">
-        <label htmlFor="add-item-symbol">Symbol</label>
-        <input
-          id="add-item-symbol"
-          type="text"
-          placeholder="e.g. STK09"
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          autoComplete="off"
-        />
-      </div>
+        <div className="add-item__field add-item__field--grow">
+          <label htmlFor="add-item-symbol">Symbol</label>
+          <input
+            id="add-item-symbol"
+            type="text"
+            placeholder="e.g. STK09"
+            value={symbol}
+            onChange={(e) => setSymbol(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
 
-      <button type="submit" className="btn btn--secondary" disabled={submitting || !symbol.trim()}>
-        {submitting ? 'Adding…' : 'Add to watchlist'}
-      </button>
+        <button type="submit" className="btn btn--secondary" disabled={submitting || !symbol.trim()}>
+          {submitting ? 'Adding…' : 'Add to watchlist'}
+        </button>
+      </form>
 
-      {error && <p className="add-item-form__error" role="alert">{error}</p>}
-    </form>
+      {error && (
+        <p className="add-item__error" role="alert">
+          {error}
+        </p>
+      )}
+      {success && (
+        <p className="add-item__success" role="status">
+          {success}
+        </p>
+      )}
+    </div>
   );
 }

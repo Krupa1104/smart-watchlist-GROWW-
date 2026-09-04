@@ -1,35 +1,54 @@
-import { formatPrice, formatDate } from '../utils/format.js';
+import { formatPrice, formatVolumeRatio } from '../utils/format.js';
+import { getPercentChange, getVolumeRatio, directionFromPercent } from '../utils/metrics.js';
 
-export default function WatchlistTable({ items, attentionSymbols, onRemove, removingSymbol }) {
-  if (items.length === 0) {
+export default function WatchlistTable({
+  items,
+  totalCount,
+  attentionSymbols,
+  detectedBySymbol,
+  editMode,
+  onRemove,
+  removingSymbol,
+}) {
+  if (totalCount === 0) {
     return (
       <p className="wl-table__empty">
-        No instruments on this watchlist yet. Add a stock or fund below to get started.
+        No instruments on this watchlist yet. Use "+ Add stocks" above to get started.
       </p>
     );
+  }
+
+  if (items.length === 0) {
+    return <p className="wl-table__empty">No instruments match your search.</p>;
   }
 
   return (
     <table className="wl-table" data-testid="watchlist-table">
       <thead>
         <tr>
-          <th scope="col">Symbol</th>
+          <th scope="col">Instrument</th>
           <th scope="col">Type</th>
           <th scope="col">Sector / Category</th>
-          <th scope="col">Latest value</th>
-          <th scope="col">As of</th>
-          <th scope="col" aria-label="Status" />
-          <th scope="col" aria-label="Actions" />
+          <th scope="col" className="wl-table__num">Price / NAV</th>
+          <th scope="col" className="wl-table__num">1D change</th>
+          <th scope="col" className="wl-table__num">Volume</th>
+          <th scope="col" aria-label="Attention" />
+          {editMode && <th scope="col" aria-label="Remove" />}
         </tr>
       </thead>
       <tbody>
         {items.map((item) => {
           const md = item.marketData;
+          const detected = detectedBySymbol.get(item.symbol);
+          const pct = detected ? getPercentChange(detected.metrics, item.instrumentType) : null;
+          const direction = directionFromPercent(pct);
+          const volumeRatio = detected ? getVolumeRatio(detected.metrics) : null;
           const flagged = attentionSymbols.has(item.symbol);
+
           return (
             <tr key={item.itemId} className={flagged ? 'wl-table__row--flagged' : undefined}>
               <th scope="row" className="wl-table__symbol">
-                {item.symbol}
+                <span className="wl-table__symbol-code">{item.symbol}</span>
                 <span className="wl-table__display-name">{md?.displayName}</span>
               </th>
               <td>
@@ -38,27 +57,35 @@ export default function WatchlistTable({ items, attentionSymbols, onRemove, remo
                 </span>
               </td>
               <td>{md?.groupLabel ?? '—'}</td>
-              <td className="wl-table__value">
+              <td className="wl-table__num wl-table__value">
                 {md?.dataAvailable ? formatPrice(md.latestValue, item.instrumentType) : 'No data'}
               </td>
-              <td>{md?.asOfDate ? formatDate(md.asOfDate) : '—'}</td>
+              <td className={`wl-table__num wl-table__change wl-table__change--${direction ?? 'flat'}`}>
+                {pct === null ? '—' : `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`}
+              </td>
+              <td className="wl-table__num wl-table__mono">{formatVolumeRatio(volumeRatio)}</td>
               <td>
                 {flagged && (
-                  <span className="wl-table__flag" title="This instrument has a meaningful change — see 'What changed' above">
+                  <span
+                    className="wl-table__flag"
+                    title="Meaningful change — see 'What changed' above"
+                  >
                     ⚡ Changed
                   </span>
                 )}
               </td>
-              <td>
-                <button
-                  type="button"
-                  className="btn btn--text"
-                  onClick={() => onRemove(item.symbol)}
-                  disabled={removingSymbol === item.symbol}
-                >
-                  {removingSymbol === item.symbol ? 'Removing…' : 'Remove'}
-                </button>
-              </td>
+              {editMode && (
+                <td>
+                  <button
+                    type="button"
+                    className="btn btn--text"
+                    onClick={() => onRemove(item.symbol)}
+                    disabled={removingSymbol === item.symbol}
+                  >
+                    {removingSymbol === item.symbol ? 'Removing…' : 'Remove'}
+                  </button>
+                </td>
+              )}
             </tr>
           );
         })}
