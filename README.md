@@ -4,6 +4,8 @@
 
 A full-stack (React + Spring Boot + PostgreSQL) watchlist that goes past "here's today's price" and tries to answer the question every investor actually asks when they open an app: **"has anything happened since I last looked, and does it matter?"**
 
+**Live:** Frontend → https://smart-watchlist-groww.vercel.app/ · Backend → https://smart-watchlist-groww.onrender.com/ (free-tier backend sleeps when idle — the first request can take ~30–60s to wake it; see §17)
+
 ---
 
 ## Part 1 — Overview (2-minute read)
@@ -43,6 +45,7 @@ related event (or an honest "no event found"), suggested next steps
 | Database | PostgreSQL |
 | Live feed | Server-Sent Events (`SseEmitter` + browser `EventSource`) — no WebSockets |
 | Data | A generated synthetic 6-month OHLCV/NAV dataset with 10 planted ground-truth events |
+| Deployment | Vercel (frontend) + Render/Docker (backend) + Neon (PostgreSQL) — all free tier (§17) |
 
 ### Simulated vs. real
 - **Real (persisted in PostgreSQL):** every stock/fund's daily OHLCV or NAV history, the 10 planted market events, all watchlists/items/snapshots.
@@ -256,7 +259,7 @@ Suggested actions (`SuggestionService`) follow a simple philosophy:
 | `GlobalExceptionHandlerTest` | An unexpected/unmapped exception maps to a clean, generic HTTP 500 — proves the client-facing message is always the fixed fallback text and never the real exception's message, and that the response body never grows an unexpected field (no stack trace) |
 | `SmartWatchlistApplicationTests` | Spring context loads |
 
-A prior local run reported 56 executed tests with 2 failures, both isolated to SSE subscriber cleanup in `TickSimulationServiceTest` (an emitter completed directly in a unit test, outside a live HTTP request, wasn't deregistering). That was root-caused and fixed by having `subscribe()` return a small `TrackedEmitter` that deregisters synchronously on `complete()`/`completeWithError()`, in addition to the existing completion callbacks used for real client disconnects. This README does not assert a fresh, fully-confirmed pass/fail count for the subsequent performance/concurrency work above, nor for `CheckWatchlistBatchRegressionTest`/`GlobalExceptionHandlerTest` (added alongside the `checkWatchlist()` batching fix and the generic-500 handler), beyond what's been directly observed — run `mvnw.cmd test` to confirm on your machine.
+A prior local run reported 56 executed tests with 2 failures, both isolated to SSE subscriber cleanup in `TickSimulationServiceTest` (an emitter completed directly in a unit test, outside a live HTTP request, wasn't deregistering). That was root-caused and fixed by having `subscribe()` return a small `TrackedEmitter` that deregisters synchronously on `complete()`/`completeWithError()`, in addition to the existing completion callbacks used for real client disconnects. The full suite — including `CheckWatchlistBatchRegressionTest` and `GlobalExceptionHandlerTest`, added alongside the `checkWatchlist()` batching fix and the generic-500 handler — has since been run and passes.
 
 **Frontend** — 47 test cases in `App.test.jsx` (Vitest + React Testing Library), grouped into: core user journey (watchlist load/add/remove/edit/delete/check), global instrument search, stale-watchlist recovery, since-last-check panel, severity legend, instrument detail panel (including the detection-history count), and the simulated live feed (subscription lifecycle, reconnect badge, table price updates without touching the 1D-change column). `npm run build` succeeds.
 
@@ -288,7 +291,9 @@ smart-watchlist-GROWW/
 │   │   ├── dto/                request/response records
 │   │   ├── exception/          + GlobalExceptionHandler
 │   │   └── config/             WebConfig (CORS)
-│   └── src/test/java/...       17 test classes (see §14)
+│   ├── src/test/java/...       17 test classes (see §14)
+│   ├── Dockerfile               multi-stage build (Maven→JRE) used by the Render deployment (see §17)
+│   └── .dockerignore
 ├── frontend/
 │   └── src/
 │       ├── App.jsx              top-level state, SSE connection owner
@@ -307,7 +312,41 @@ smart-watchlist-GROWW/
     └── SCALABILITY.md            source for §12 above
 ```
 
-### 17. Running the Project
+### 17. Deployment
+
+The project is deployed end-to-end, not just runnable locally — a live Docker-based deployment on free tiers throughout:
+
+```
+Vercel (React/Vite build)
+   │
+   │  REST (fetch) + SSE (EventSource) — same API contract as local dev, nothing frontend-specific changed for deployment
+   ▼
+Render (Spring Boot, Docker runtime)
+   │
+   │  JDBC, pooled connection
+   ▼
+Neon (PostgreSQL, serverless)
+```
+
+**Live URLs:**
+- Frontend: https://smart-watchlist-groww.vercel.app/
+- Backend: https://smart-watchlist-groww.onrender.com/
+
+**Neon (PostgreSQL)** — the production database. Schema and data were loaded using the exact same, already-existing scripts as local dev (`data-generator/schema.sql`, then `load_to_postgres.py --dsn "<neon-connection-string>"`) — no separate deployment-only tooling was written. Currently seeded with the real dataset: 36 stocks, 15 funds, 4536 `stock_prices` rows, 1890 `fund_navs` rows, 10 `market_events`, one demo user (id=1) with one demo watchlist (id=1, 12 items). Uses Neon's pooled connection endpoint, since the backend's HikariCP pool holds multiple open connections against a free-tier compute budget.
+
+**Render (backend)** — Docker runtime, root directory `backend`, built from `backend/Dockerfile` (see §16). Datasource config is overridden via environment variables (`SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, pointing at Neon) — Spring's own property-binding picks these up automatically, so no code differs between local and deployed. Free tier: the service sleeps after ~15 minutes idle; the first request afterward takes roughly 30–60 seconds to wake it before responding normally — expected free-tier behavior, not an error.
+
+**Vercel (frontend)** — static Vite build. `VITE_API_BASE_URL` is set to the Render URL above and `VITE_DEMO_USER_ID=1`, both read via `frontend/src/config.js` exactly as they are locally (see `.env.example`) — deploying required no frontend code change, only setting these two build-time env vars.
+
+**PORT handling** — Render assigns its own port at runtime via a `PORT` env var. Rather than touch `application.properties` (unchanged from local dev — see below), this is handled entirely inside `Dockerfile`'s `ENTRYPOINT` (`-Dserver.port=${PORT:-8080}`), falling back to 8080 if `PORT` isn't set, so a plain local `docker run` behaves identically to always.
+
+**CORS** — `WebConfig.java` allows `http://localhost:5173`, `http://localhost:5174`, and `https://smart-watchlist-groww.vercel.app` (see §13). This was the one actual code change deployment required.
+
+**Local vs. deployed — no other differences.** `application.properties` still points at `jdbc:postgresql://localhost:5432/watchlist_db` reading `${DB_PASSWORD}`, exactly as in §18 below — that's correct and intentional, not stale. Local runs use that; the deployed Render environment overrides the same three Spring properties via its own env vars pointing at Neon instead. Same jar, same code, different environment configuration only.
+
+### 18. Running the Project (locally)
+
+This is the local-dev setup — for the live deployed version, see §17.
 
 **Prerequisites:** Java 17, Maven, Node.js, PostgreSQL, Python 3 (for the data generator).
 
@@ -349,7 +388,7 @@ npm test
 npm run build
 ```
 
-### 18. Future / Production Improvements
+### 19. Future / Production Improvements
 
 - Redis Pub/Sub (or equivalent) for shared tick distribution across multiple backend instances (§12).
 - A real market-data provider, if this ever needed to leave "demo" status.
