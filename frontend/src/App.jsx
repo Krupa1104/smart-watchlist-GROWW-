@@ -47,6 +47,7 @@ export default function App() {
   const [checkDiffs, setCheckDiffs] = useState([]);
   const [detailSymbol, setDetailSymbol] = useState(null);
   const [liveValues, setLiveValues] = useState(new Map());
+  const [liveStatus, setLiveStatus] = useState('connecting'); // 'connecting' | 'connected' | 'reconnecting'
 
   const [addOpen, setAddOpen] = useState(false);
   const [addSubmitting, setAddSubmitting] = useState(false);
@@ -112,16 +113,21 @@ export default function App() {
   // runs on unmount.
   useEffect(() => {
     setLiveValues(new Map());
+    setLiveStatus('connecting');
     if (selectedId == null) return undefined;
-    const unsubscribe = subscribeToLiveTicks(selectedId, (batch) => {
-      setLiveValues((prev) => {
-        const next = new Map(prev);
-        batch.forEach((t) => {
-          next.set(t.symbol, { value: t.value, asOfDate: t.asOfDate, instrumentType: t.instrumentType });
+    const unsubscribe = subscribeToLiveTicks(
+      selectedId,
+      (batch) => {
+        setLiveValues((prev) => {
+          const next = new Map(prev);
+          batch.forEach((t) => {
+            next.set(t.symbol, { value: t.value, asOfDate: t.asOfDate, instrumentType: t.instrumentType });
+          });
+          return next;
         });
-        return next;
-      });
-    });
+      },
+      (status) => setLiveStatus(status)
+    );
     return unsubscribe;
   }, [selectedId]);
 
@@ -431,6 +437,7 @@ export default function App() {
                 onDeleteWatchlist={handleDeleteWatchlist}
                 deletingWatchlist={deletingWatchlist}
                 liveFeedActive={liveValues.size > 0}
+                liveStatus={liveStatus}
               />
 
               {deleteError && (

@@ -1027,6 +1027,13 @@ body {
   display: inline-block;
   animation: live-pulse 1.4s ease-in-out infinite;
 }
+.wl-toolbar__live-badge--reconnecting {
+  color: var(--gold);
+  background: var(--gold-bg);
+}
+.wl-toolbar__live-dot--reconnecting {
+  background: var(--gold);
+}
 .wl-table__live-dot {
   width: 6px;
   height: 6px;
@@ -1057,6 +1064,7 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .wl-toolbar__live-dot,
+  .wl-toolbar__live-dot--reconnecting,
   .wl-table__live-dot {
     animation: none;
   }

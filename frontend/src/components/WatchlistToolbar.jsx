@@ -12,6 +12,7 @@ export default function WatchlistToolbar({
   onDeleteWatchlist,
   deletingWatchlist,
   liveFeedActive,
+  liveStatus,
 }) {
   return (
     <div className="wl-toolbar">
@@ -30,7 +31,16 @@ export default function WatchlistToolbar({
           {itemCount} {itemCount === 1 ? 'instrument' : 'instruments'}
           {dataAsOf && <> · data as of {dataAsOf}</>}
         </span>
-        {liveFeedActive && (
+        {liveStatus === 'reconnecting' && (
+          <span
+            className="wl-toolbar__live-badge wl-toolbar__live-badge--reconnecting"
+            title="The live feed connection dropped — your browser is retrying automatically"
+          >
+            <span className="wl-toolbar__live-dot wl-toolbar__live-dot--reconnecting" aria-hidden="true" />
+            Reconnecting to live feed…
+          </span>
+        )}
+        {liveStatus !== 'reconnecting' && liveFeedActive && (
           <span className="wl-toolbar__live-badge" title="Prices tick in-app for demo purposes — not a real market feed">
             <span className="wl-toolbar__live-dot" aria-hidden="true" />
             Simulated live data

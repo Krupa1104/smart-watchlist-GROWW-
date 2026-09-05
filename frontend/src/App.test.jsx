@@ -13,9 +13,9 @@ vi.mock('./api/liveFeed.js');
 // an incoming SSE tick — no real EventSource needed (jsdom has none).
 function setupLiveFeedMock() {
   const calls = [];
-  liveFeedApi.subscribeToLiveTicks.mockImplementation((watchlistId, onBatch) => {
+  liveFeedApi.subscribeToLiveTicks.mockImplementation((watchlistId, onBatch, onStatusChange) => {
     const unsubscribe = vi.fn();
-    calls.push({ watchlistId, onBatch, unsubscribe });
+    calls.push({ watchlistId, onBatch, onStatusChange, unsubscribe });
     return unsubscribe;
   });
   return calls;
@@ -920,5 +920,69 @@ describe('App — Feature 5: simulated live feed', () => {
     await screen.findByRole('dialog', { name: /STK01/i });
 
     expect(liveFeedApi.subscribeToLiveTicks).toHaveBeenCalledTimes(1); // still just the one, App-level connection
+  });
+
+  it('shows a "Reconnecting to live feed…" message when the connection errors, replacing the live badge', async () => {
+    setupDefaultMocks();
+    const liveCalls = setupLiveFeedMock();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    act(() => {
+      liveCalls[0].onBatch([{ symbol: 'STK01', instrumentType: 'STOCK', value: 3601.25, asOfDate: '2026-08-24' }]);
+    });
+    await waitFor(() => expect(screen.getByText(/simulated live data/i)).toBeInTheDocument());
+
+    act(() => {
+      liveCalls[0].onStatusChange('reconnecting');
+    });
+
+    await waitFor(() => expect(screen.getByText(/reconnecting to live feed/i)).toBeInTheDocument());
+    expect(screen.queryByText(/simulated live data/i)).not.toBeInTheDocument();
+  });
+
+  it('returns to the normal live badge once the connection reconnects', async () => {
+    setupDefaultMocks();
+    const liveCalls = setupLiveFeedMock();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    act(() => {
+      liveCalls[0].onBatch([{ symbol: 'STK01', instrumentType: 'STOCK', value: 3601.25, asOfDate: '2026-08-24' }]);
+    });
+    act(() => {
+      liveCalls[0].onStatusChange('reconnecting');
+    });
+    await waitFor(() => expect(screen.getByText(/reconnecting to live feed/i)).toBeInTheDocument());
+
+    act(() => {
+      liveCalls[0].onStatusChange('connected');
+    });
+
+    await waitFor(() => expect(screen.getByText(/simulated live data/i)).toBeInTheDocument());
+    expect(screen.queryByText(/reconnecting to live feed/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show a stale reconnecting message after switching to a different watchlist', async () => {
+    setupDefaultMocks({
+      summaries: [
+        { id: 1, name: 'My Watchlist', createdAt: '2026-08-24T10:00:00Z', itemCount: 2 },
+        { id: 3, name: 'Second List', createdAt: '2026-08-24T10:00:00Z', itemCount: 0 },
+      ],
+    });
+    const liveCalls = setupLiveFeedMock();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    act(() => {
+      liveCalls[0].onStatusChange('reconnecting');
+    });
+    await waitFor(() => expect(screen.getByText(/reconnecting to live feed/i)).toBeInTheDocument());
+
+    await user.click(screen.getByText('Second List'));
+
+    await waitFor(() => expect(liveFeedApi.subscribeToLiveTicks).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/reconnecting to live feed/i)).not.toBeInTheDocument();
   });
 });
