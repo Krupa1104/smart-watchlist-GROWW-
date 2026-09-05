@@ -6,6 +6,9 @@ import AttentionSection from './components/AttentionSection.jsx';
 import WatchlistTable from './components/WatchlistTable.jsx';
 import AddItemForm from './components/AddItemForm.jsx';
 import CreateWatchlistModal from './components/CreateWatchlistModal.jsx';
+import SinceLastCheckPanel from './components/SinceLastCheckPanel.jsx';
+import SeverityLegend from './components/SeverityLegend.jsx';
+import InstrumentDetailPanel from './components/InstrumentDetailPanel.jsx';
 import { LoadingState, ErrorState, EmptyState } from './components/StatusStates.jsx';
 import {
   listWatchlists,
@@ -40,6 +43,8 @@ export default function App() {
   const [createError, setCreateError] = useState(null);
   const [checking, setChecking] = useState(false);
   const [checkSummary, setCheckSummary] = useState(null);
+  const [checkDiffs, setCheckDiffs] = useState([]);
+  const [detailSymbol, setDetailSymbol] = useState(null);
 
   const [addOpen, setAddOpen] = useState(false);
   const [addSubmitting, setAddSubmitting] = useState(false);
@@ -137,6 +142,9 @@ export default function App() {
     setEditMode(false);
     setTableSearch('');
     setDeleteError(null);
+    setCheckSummary(null);
+    setCheckDiffs([]);
+    setDetailSymbol(null);
     loadWatchlist(selectedId);
     loadInsights(selectedId);
   }, [selectedId, loadWatchlist, loadInsights]);
@@ -198,6 +206,7 @@ export default function App() {
     setCheckSummary(null);
     try {
       const diffs = await checkWatchlist(selectedId);
+      setCheckDiffs(diffs);
       const movedCount = diffs.filter(
         (d) => !d.firstView && d.dataAvailable && d.previousValue !== d.currentValue
       ).length;
@@ -211,6 +220,7 @@ export default function App() {
       await loadInsights(selectedId);
     } catch (err) {
       setCheckSummary(null);
+      setCheckDiffs([]);
       setAttentionError(err.message);
       await recoverFromStaleWatchlist(err, selectedId);
     } finally {
@@ -296,9 +306,21 @@ export default function App() {
     addSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+  // Clicking a row in the watchlist table opens the instrument detail
+  // panel — a read-only view (see InstrumentDetailPanel/backend
+  // getInstrumentDetail), never mutates anything on its own.
+  function handleOpenDetail(symbol) {
+    setDetailSymbol(symbol);
+  }
+
+  function handleCloseDetail() {
+    setDetailSymbol(null);
+  }
+
   const attentionSymbols = new Set(attentionItems.map((i) => i.symbol));
   const detectedBySymbol = new Map(detectedItems.map((d) => [d.symbol, d]));
   const allItems = watchlist?.items ?? [];
+  const displayNameBySymbol = new Map(allItems.map((i) => [i.symbol, i.marketData?.displayName]));
   const filteredItems = tableSearch.trim()
     ? allItems.filter((item) => {
         const q = tableSearch.trim().toLowerCase();
@@ -354,11 +376,20 @@ export default function App() {
               error={attentionError}
               onRetry={() => loadInsights(selectedId)}
             />
+            <SeverityLegend />
 
             {checkSummary && (
               <p className="check-summary" role="status">
                 {checkSummary}
               </p>
+            )}
+
+            {checkDiffs.length > 0 && (
+              <SinceLastCheckPanel
+                diffs={checkDiffs}
+                detectedBySymbol={detectedBySymbol}
+                displayNameBySymbol={displayNameBySymbol}
+              />
             )}
 
             <section className="wl-panel" aria-label="Watchlist">
@@ -409,12 +440,21 @@ export default function App() {
                   editMode={editMode}
                   onRemove={handleRemoveItem}
                   removingSymbol={removingSymbol}
+                  onSelectInstrument={handleOpenDetail}
                 />
               )}
             </section>
           </>
         )}
       </main>
+
+      {detailSymbol && selectedId != null && (
+        <InstrumentDetailPanel
+          watchlistId={selectedId}
+          symbol={detailSymbol}
+          onClose={handleCloseDetail}
+        />
+      )}
     </div>
   );
 }

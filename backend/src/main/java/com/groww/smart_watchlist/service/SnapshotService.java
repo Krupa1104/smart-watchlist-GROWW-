@@ -22,6 +22,19 @@ public class SnapshotService {
     }
 
     /**
+     * Read-only counterpart to recordCheck() — shows what "since last
+     * check" would say WITHOUT overwriting the snapshot, so merely viewing
+     * an instrument's detail panel never moves the user's "last seen"
+     * baseline (same read-only contract WatchlistService.getWatchlist()
+     * already has for the main table). This is the only other place in the
+     * app that touches watchlist_snapshots, and it never writes.
+     */
+    @Transactional(readOnly = true)
+    public Optional<WatchlistSnapshot> peekSnapshot(Integer watchlistItemId) {
+        return snapshotRepository.findByWatchlistItemId(watchlistItemId);
+    }
+
+    /**
      * Diffs the item's current market data against whatever snapshot exists,
      * THEN overwrites the snapshot with the current value — in that order,
      * so the caller gets the "before" state before it's gone. This is the

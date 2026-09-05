@@ -49,6 +49,13 @@ export function addItem(watchlistId, symbol, instrumentType, userId = DEMO_USER_
   });
 }
 
+// Backs the instrument detail panel — nested under the watchlist (not a
+// standalone /api/instruments/{symbol}) because "since last check" there is
+// scoped to THIS watchlist item's own snapshot; see WatchlistController.
+export function getInstrumentDetail(watchlistId, symbol, userId = DEMO_USER_ID) {
+  return apiClient.get(`/api/watchlists/${watchlistId}/items/${symbol}/detail`, { userId });
+}
+
 export function removeItem(watchlistId, symbol, userId = DEMO_USER_ID) {
   return apiClient.delete(`/api/watchlists/${watchlistId}/items/${symbol}`, { userId });
 }

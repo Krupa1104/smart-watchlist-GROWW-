@@ -3,7 +3,10 @@ package com.groww.smart_watchlist.service;
 import com.groww.smart_watchlist.dto.AddWatchlistItemRequest;
 import com.groww.smart_watchlist.dto.AttentionItemResponse;
 import com.groww.smart_watchlist.dto.DetectedChangeResponse;
+import com.groww.smart_watchlist.dto.InstrumentDetailResponse;
 import com.groww.smart_watchlist.dto.MarketDataResponse;
+import com.groww.smart_watchlist.dto.PricePointResponse;
+import com.groww.smart_watchlist.dto.RelatedEventResponse;
 import com.groww.smart_watchlist.dto.SnapshotDiffResponse;
 import com.groww.smart_watchlist.dto.WatchlistItemResponse;
 import com.groww.smart_watchlist.dto.WatchlistResponse;
@@ -23,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class WatchlistService {
@@ -33,19 +37,25 @@ public class WatchlistService {
     private final MarketDataService marketDataService;
     private final SnapshotService snapshotService;
     private final ChangeDetectionService changeDetectionService;
+    private final EventCorrelationService eventCorrelationService;
+    private final SuggestionService suggestionService;
 
     public WatchlistService(WatchlistRepository watchlistRepository,
                              WatchlistItemRepository watchlistItemRepository,
                              UserRepository userRepository,
                              MarketDataService marketDataService,
                              SnapshotService snapshotService,
-                             ChangeDetectionService changeDetectionService) {
+                             ChangeDetectionService changeDetectionService,
+                             EventCorrelationService eventCorrelationService,
+                             SuggestionService suggestionService) {
         this.watchlistRepository = watchlistRepository;
         this.watchlistItemRepository = watchlistItemRepository;
         this.userRepository = userRepository;
         this.marketDataService = marketDataService;
         this.snapshotService = snapshotService;
         this.changeDetectionService = changeDetectionService;
+        this.eventCorrelationService = eventCorrelationService;
+        this.suggestionService = suggestionService;
     }
 
     @Transactional
@@ -185,6 +195,38 @@ public class WatchlistService {
                 .toList();
     }
 
+    /**
+     * Backs the instrument detail panel (click a row in the watchlist
+     * table). Deliberately just an assembly of things every other endpoint
+     * here already computes — MarketDataService for current value/history,
+     * ChangeDetectionService for the verdict (same detect() call /detect
+     * itself uses, so the two can't disagree), EventCorrelationService and
+     * SuggestionService for the two new narrowly-scoped additions — plus a
+     * read-only "since last check" built straight from the item's existing
+     * snapshot. No new detection logic lives here.
+     */
+    @Transactional
+    public InstrumentDetailResponse getInstrumentDetail(Integer watchlistId, Integer userId, String symbol) {
+        loadOwnedWatchlist(watchlistId, userId); // ownership check, same as every other endpoint
+        String normalizedSymbol = symbol.trim().toUpperCase();
+        WatchlistItem item = watchlistItemRepository
+                .findByWatchlistIdAndSymbol(watchlistId, normalizedSymbol)
+                .orElseThrow(() -> new ResourceNotFoundException(normalizedSymbol + " is not on this watchlist"));
+
+        MarketDataResponse marketData = marketDataService.getLatestMarketData(normalizedSymbol, item.getInstrumentType());
+        List<PricePointResponse> recentHistory = marketDataService.getRecentHistory(normalizedSymbol, item.getInstrumentType());
+        DetectedChangeResponse detectedChange = changeDetectionService.detect(normalizedSymbol, item.getInstrumentType());
+        Optional<RelatedEventResponse> relatedEvent =
+                eventCorrelationService.findRelatedEvent(normalizedSymbol, item.getInstrumentType(), detectedChange.asOfDate());
+        List<String> suggestedActions = suggestionService.suggestActions(detectedChange, relatedEvent);
+        SnapshotDiffResponse sinceLastCheck = buildSinceLastCheck(item, marketData);
+
+        return new InstrumentDetailResponse(
+                normalizedSymbol, item.getInstrumentType(), marketData, recentHistory,
+                detectedChange, sinceLastCheck, relatedEvent.orElse(null), suggestedActions
+        );
+    }
+
     @Transactional
     public void removeItem(Integer watchlistId, Integer userId, String symbol) {
         loadOwnedWatchlist(watchlistId, userId); // ownership check
@@ -242,5 +284,34 @@ public class WatchlistService {
     private WatchlistSummaryResponse toSummary(Watchlist watchlist, int itemCount) {
         return new WatchlistSummaryResponse(
                 watchlist.getId(), watchlist.getName(), watchlist.getCreatedAt(), itemCount);
+    }
+
+    /**
+     * Read-only counterpart to SnapshotService.recordCheck(): builds the
+     * exact same SnapshotDiffResponse shape /check returns, but from
+     * whatever snapshot already exists — WITHOUT overwriting it. Viewing an
+     * instrument's detail panel must never move the user's "last seen"
+     * baseline; only the explicit /check action is allowed to do that.
+     */
+    private SnapshotDiffResponse buildSinceLastCheck(WatchlistItem item, MarketDataResponse marketData) {
+        if (!marketData.dataAvailable() || marketData.latestValue() == null) {
+            return new SnapshotDiffResponse(
+                    item.getId(), item.getSymbol(), item.getInstrumentType(),
+                    null, null, null, null, false, false
+            );
+        }
+        return snapshotService.peekSnapshot(item.getId())
+                .map(snap -> new SnapshotDiffResponse(
+                        item.getId(), item.getSymbol(), item.getInstrumentType(),
+                        snap.getLastSeenValue(), snap.getLastViewedAt(),
+                        marketData.latestValue(), marketData.asOfDate(),
+                        false, true
+                ))
+                .orElseGet(() -> new SnapshotDiffResponse(
+                        item.getId(), item.getSymbol(), item.getInstrumentType(),
+                        null, null,
+                        marketData.latestValue(), marketData.asOfDate(),
+                        true, true
+                ));
     }
 }

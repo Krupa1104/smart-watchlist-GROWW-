@@ -2,9 +2,12 @@ package com.groww.smart_watchlist.service;
 
 import com.groww.smart_watchlist.dto.InstrumentSummaryResponse;
 import com.groww.smart_watchlist.dto.MarketDataResponse;
+import com.groww.smart_watchlist.dto.PricePointResponse;
 import com.groww.smart_watchlist.entity.Fund;
+import com.groww.smart_watchlist.entity.FundNav;
 import com.groww.smart_watchlist.entity.InstrumentType;
 import com.groww.smart_watchlist.entity.Stock;
+import com.groww.smart_watchlist.entity.StockPrice;
 import com.groww.smart_watchlist.exception.ResourceNotFoundException;
 import com.groww.smart_watchlist.repository.FundNavRepository;
 import com.groww.smart_watchlist.repository.FundRepository;
@@ -23,6 +26,11 @@ import java.util.List;
 // every caller, which matters once Phase 3 (detection) needs the same data.
 @Service
 public class MarketDataService {
+
+    // Recent-history depth for the instrument detail panel's mini chart —
+    // enough to see a real trend/shape without shipping the full ~126-day
+    // series for a simple sparkline.
+    private static final int RECENT_HISTORY_LIMIT = 30;
 
     private final StockRepository stockRepository;
     private final FundRepository fundRepository;
@@ -73,6 +81,30 @@ public class MarketDataService {
         return instrumentType == InstrumentType.STOCK
                 ? getLatestStockData(symbol)
                 : getLatestFundData(symbol);
+    }
+
+    /**
+     * Recent daily history for the instrument detail panel — oldest first,
+     * so the frontend can plot it left-to-right without re-sorting. Reuses
+     * the existing findBySymbolOrderBy*Desc queries (no new SQL, no schema
+     * change); this is presentation-only, distinct from the rolling
+     * statistics ChangeDetectionService computes over the same tables.
+     */
+    public List<PricePointResponse> getRecentHistory(String symbol, InstrumentType instrumentType) {
+        if (instrumentType == InstrumentType.STOCK) {
+            List<StockPrice> rows = stockPriceRepository.findBySymbolOrderByTradeDateDesc(symbol);
+            return rows.stream()
+                    .limit(RECENT_HISTORY_LIMIT)
+                    .sorted(Comparator.comparing(StockPrice::getTradeDate))
+                    .map(p -> new PricePointResponse(p.getTradeDate(), p.getClose(), p.getVolume()))
+                    .toList();
+        }
+        List<FundNav> rows = fundNavRepository.findBySymbolOrderByNavDateDesc(symbol);
+        return rows.stream()
+                .limit(RECENT_HISTORY_LIMIT)
+                .sorted(Comparator.comparing(FundNav::getNavDate))
+                .map(n -> new PricePointResponse(n.getNavDate(), n.getNav(), null))
+                .toList();
     }
 
     private MarketDataResponse getLatestStockData(String symbol) {

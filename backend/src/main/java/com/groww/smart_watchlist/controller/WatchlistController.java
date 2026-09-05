@@ -4,6 +4,7 @@ import com.groww.smart_watchlist.dto.AddWatchlistItemRequest;
 import com.groww.smart_watchlist.dto.AttentionItemResponse;
 import com.groww.smart_watchlist.dto.CreateWatchlistRequest;
 import com.groww.smart_watchlist.dto.DetectedChangeResponse;
+import com.groww.smart_watchlist.dto.InstrumentDetailResponse;
 import com.groww.smart_watchlist.dto.SnapshotDiffResponse;
 import com.groww.smart_watchlist.dto.WatchlistItemResponse;
 import com.groww.smart_watchlist.dto.WatchlistResponse;
@@ -95,6 +96,20 @@ public class WatchlistController {
             @Valid @RequestBody AddWatchlistItemRequest request) {
         WatchlistItemResponse added = watchlistService.addItem(watchlistId, userId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(added);
+    }
+
+    // Backs the instrument detail panel (click a row in the watchlist
+    // table). Nested under the owning watchlist (not a standalone
+    // /api/instruments/{symbol}) because "since last check" is scoped to
+    // THIS watchlist item's own snapshot — the same symbol could sit on two
+    // different watchlists with two different snapshots. Same ownership
+    // check as every other endpoint here.
+    @GetMapping("/{watchlistId}/items/{symbol}/detail")
+    public InstrumentDetailResponse getInstrumentDetail(
+            @PathVariable Integer watchlistId,
+            @PathVariable String symbol,
+            @RequestParam Integer userId) {
+        return watchlistService.getInstrumentDetail(watchlistId, userId, symbol);
     }
 
     @DeleteMapping("/{watchlistId}/items/{symbol}")

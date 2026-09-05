@@ -44,6 +44,35 @@ export function formatDateTime(value) {
   });
 }
 
+// "Since your last check" needs a human-scale elapsed time ("2 hours ago"),
+// not a timestamp — this is a presentation-only computation over data the
+// backend already returns (SnapshotDiffResponse.previousViewedAt), no new
+// API needed.
+export function formatRelativeTime(value) {
+  if (!value) return null;
+  const then = new Date(value).getTime();
+  if (Number.isNaN(then)) return null;
+  const diffMs = Date.now() - then;
+  if (diffMs < 0) return 'just now';
+
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diffMs < minute) return 'just now';
+  if (diffMs < hour) {
+    const mins = Math.floor(diffMs / minute);
+    return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  }
+  if (diffMs < day) {
+    const hrs = Math.floor(diffMs / hour);
+    return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  }
+  const days = Math.floor(diffMs / day);
+  if (days < 30) return `${days} day${days === 1 ? '' : 's'} ago`;
+  return formatDate(value);
+}
+
 // Human label for the backend's changeType strings (e.g. "PRICE_SPIKE").
 export function formatChangeType(changeType) {
   if (!changeType) return '';

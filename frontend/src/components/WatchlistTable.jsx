@@ -9,6 +9,7 @@ export default function WatchlistTable({
   editMode,
   onRemove,
   removingSymbol,
+  onSelectInstrument,
 }) {
   if (totalCount === 0) {
     return (
@@ -46,7 +47,22 @@ export default function WatchlistTable({
           const flagged = attentionSymbols.has(item.symbol);
 
           return (
-            <tr key={item.itemId} className={flagged ? 'wl-table__row--flagged' : undefined}>
+            <tr
+              key={item.itemId}
+              className={`wl-table__row${flagged ? ' wl-table__row--flagged' : ''}${onSelectInstrument ? ' wl-table__row--clickable' : ''}`}
+              onClick={onSelectInstrument ? () => onSelectInstrument(item.symbol) : undefined}
+              tabIndex={onSelectInstrument ? 0 : undefined}
+              onKeyDown={
+                onSelectInstrument
+                  ? (e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onSelectInstrument(item.symbol);
+                      }
+                    }
+                  : undefined
+              }
+            >
               <th scope="row" className="wl-table__symbol">
                 <span className="wl-table__symbol-code">{item.symbol}</span>
                 <span className="wl-table__display-name">{md?.displayName}</span>
@@ -79,7 +95,10 @@ export default function WatchlistTable({
                   <button
                     type="button"
                     className="btn btn--text"
-                    onClick={() => onRemove(item.symbol)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemove(item.symbol);
+                    }}
                     disabled={removingSymbol === item.symbol}
                   >
                     {removingSymbol === item.symbol ? 'Removing…' : 'Remove'}

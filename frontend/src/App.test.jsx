@@ -87,6 +87,53 @@ const INSTRUMENTS = [
   { symbol: 'FUND01', instrumentType: 'FUND', name: 'Growth Fund', groupLabel: 'Equity' },
 ];
 
+const INSTRUMENT_DETAIL = {
+  symbol: 'STK01',
+  instrumentType: 'STOCK',
+  marketData: {
+    symbol: 'STK01',
+    instrumentType: 'STOCK',
+    displayName: 'Acme Corp',
+    groupLabel: 'IT',
+    latestValue: 3570.5,
+    asOfDate: '2026-08-24',
+    dataAvailable: true,
+  },
+  recentHistory: [
+    { date: '2026-08-20', value: 3400, volume: 100000 },
+    { date: '2026-08-21', value: 3450, volume: 110000 },
+    { date: '2026-08-22', value: 3500, volume: 105000 },
+    { date: '2026-08-23', value: 3520, volume: 120000 },
+    { date: '2026-08-24', value: 3570.5, volume: 130000 },
+  ],
+  detectedChange: {
+    symbol: 'STK01',
+    instrumentType: 'STOCK',
+    asOfDate: '2026-08-24',
+    meaningful: true,
+    changeType: 'return_z_score',
+    severityScore: 3.2,
+    explanation: 'STK01 moved 9.1% versus its normal daily range.',
+    metrics: { dailyReturn: 0.091, returnZScore: 3.2, volumeRatio: 2.4 },
+  },
+  sinceLastCheck: {
+    itemId: 10,
+    symbol: 'STK01',
+    instrumentType: 'STOCK',
+    previousValue: 3400,
+    previousViewedAt: '2026-08-24T09:00:00Z',
+    currentValue: 3570.5,
+    currentAsOfDate: '2026-08-24',
+    firstView: false,
+    dataAvailable: true,
+  },
+  relatedEvent: null,
+  suggestedActions: [
+    'No recorded event found — treat this as a statistical anomaly and verify independently.',
+    'Monitor this instrument closely over the next few sessions before drawing conclusions.',
+  ],
+};
+
 function setupDefaultMocks({ attention = [], detected = DETECTED, summaries = SUMMARIES } = {}) {
   api.listWatchlists.mockResolvedValue(summaries);
   api.listInstruments.mockResolvedValue(INSTRUMENTS);
@@ -97,6 +144,7 @@ function setupDefaultMocks({ attention = [], detected = DETECTED, summaries = SU
   api.addItem.mockResolvedValue({});
   api.removeItem.mockResolvedValue(undefined);
   api.deleteWatchlist.mockResolvedValue(undefined);
+  api.getInstrumentDetail.mockResolvedValue(INSTRUMENT_DETAIL);
   api.createWatchlist.mockResolvedValue({ id: 2, name: 'New Watchlist', createdAt: '2026-08-24T00:00:00Z' });
 }
 
@@ -575,5 +623,170 @@ describe('App — stale watchlist recovery (Issue 3)', () => {
 
     await waitFor(() => expect(screen.getByText('Could not reach the backend.')).toBeInTheDocument());
     expect(api.listWatchlists).toHaveBeenCalledTimes(1); // no recovery re-fetch for a plain network error
+  });
+});
+
+describe('App — since last check panel', () => {
+  const CHECK_DIFFS = [
+    {
+      itemId: 10,
+      symbol: 'STK01',
+      instrumentType: 'STOCK',
+      previousValue: 3400,
+      previousViewedAt: '2026-08-24T09:00:00Z',
+      currentValue: 3570.5,
+      currentAsOfDate: '2026-08-24',
+      firstView: false,
+      dataAvailable: true,
+    },
+    {
+      itemId: 11,
+      symbol: 'FUND01',
+      instrumentType: 'FUND',
+      previousValue: null,
+      previousViewedAt: null,
+      currentValue: 42.1,
+      currentAsOfDate: '2026-08-24',
+      firstView: true,
+      dataAvailable: true,
+    },
+  ];
+
+  it('shows a detailed since-last-check breakdown after checking, not just the summary line', async () => {
+    setupDefaultMocks();
+    api.checkWatchlist.mockResolvedValue(CHECK_DIFFS);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByRole('button', { name: /check for changes/i }));
+
+    const panel = await screen.findByTestId('since-check-panel');
+    expect(within(panel).getByText(/3,400/)).toBeInTheDocument();
+    expect(within(panel).getByText(/3,570/)).toBeInTheDocument();
+    // FUND01 was a first-time check — surfaced as a baseline note, not a comparison row
+    expect(within(panel).queryByText('FUND01')).not.toBeInTheDocument();
+    expect(within(panel).getByText(/first time/i)).toBeInTheDocument();
+  });
+
+  it('marks a meaningful move as Unusual and a normal move as Normal', async () => {
+    setupDefaultMocks();
+    api.checkWatchlist.mockResolvedValue(CHECK_DIFFS);
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByRole('button', { name: /check for changes/i }));
+
+    const panel = await screen.findByTestId('since-check-panel');
+    // STK01 is `meaningful: true` in DETECTED fixture
+    expect(within(panel).getByText('Unusual')).toBeInTheDocument();
+  });
+
+  it('does not render the panel when there is nothing to check', async () => {
+    setupDefaultMocks(); // default checkWatchlist resolves to []
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByRole('button', { name: /check for changes/i }));
+
+    await waitFor(() => expect(api.checkWatchlist).toHaveBeenCalled());
+    expect(screen.queryByTestId('since-check-panel')).not.toBeInTheDocument();
+  });
+});
+
+describe('App — severity legend', () => {
+  it('renders a legend explaining severity tiers and what σ means', async () => {
+    setupDefaultMocks();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByText(/what do these severity levels mean/i)).toBeInTheDocument();
+    expect(screen.getByText(/standard deviation/i)).toBeInTheDocument();
+    expect(screen.getByText('High attention')).toBeInTheDocument();
+  });
+});
+
+describe('App — instrument detail panel', () => {
+  it('opens the detail panel when a watchlist row is clicked, with real backend data', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByText('STK01'));
+
+    await waitFor(() => expect(api.getInstrumentDetail).toHaveBeenCalledWith(1, 'STK01'));
+    const dialog = await screen.findByRole('dialog', { name: /STK01/i });
+    expect(within(dialog).getByText('Acme Corp')).toBeInTheDocument();
+    expect(within(dialog).getByText('No recorded event — statistical anomaly only.')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/monitor this instrument closely/i)
+    ).toBeInTheDocument();
+  });
+
+  it('shows a related event when one is present, instead of the no-event message', async () => {
+    setupDefaultMocks();
+    api.getInstrumentDetail.mockResolvedValue({
+      ...INSTRUMENT_DETAIL,
+      relatedEvent: {
+        eventDate: '2026-03-30',
+        scope: 'stock',
+        eventType: 'earnings_beat',
+        description: 'Beats Q1 earnings estimates',
+      },
+      suggestedActions: ['Review the related event below — it may explain this move.'],
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByText('STK01'));
+
+    const dialog = await screen.findByRole('dialog', { name: /STK01/i });
+    expect(within(dialog).getByText('Beats Q1 earnings estimates')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/no recorded event/i)).not.toBeInTheDocument();
+  });
+
+  it('closes the detail panel via the close button', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByText('STK01'));
+    await screen.findByRole('dialog', { name: /STK01/i });
+
+    await user.click(screen.getByRole('button', { name: /close/i }));
+    expect(screen.queryByRole('dialog', { name: /STK01/i })).not.toBeInTheDocument();
+  });
+
+  it('shows an error state if the detail fetch fails', async () => {
+    setupDefaultMocks();
+    api.getInstrumentDetail.mockRejectedValue(new Error('Could not reach the backend.'));
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByText('STK01'));
+
+    const dialog = await screen.findByRole('dialog', { name: /STK01/i });
+    expect(await within(dialog).findByText('Could not reach the backend.')).toBeInTheDocument();
+  });
+
+  it('clicking Remove in edit mode does not also open the detail panel', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByRole('button', { name: /^edit$/i }));
+    const removeButtons = await screen.findAllByRole('button', { name: /^remove$/i });
+    await user.click(removeButtons[0]);
+
+    await waitFor(() => expect(api.removeItem).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(api.getInstrumentDetail).not.toHaveBeenCalled();
   });
 });
