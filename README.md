@@ -126,9 +126,9 @@ Two independent data paths worth calling out explicitly, because keeping them se
 **Controllers**: `WatchlistController` (everything watchlist-scoped: CRUD, check, detect, attention, item add/remove, instrument detail, the `/live` SSE stream) and `InstrumentController` (`GET /api/instruments`, the full reference list backing global search).
 
 **Services**:
-- `MarketDataService` — the only place that knows STOCK reads from `stock_prices` and FUND from `fund_navs`; also the seam where "current price" is sourced from the simulated feed.
-- `SnapshotService` — owns `watchlist_snapshots`. `recordCheck()` reads the existing snapshot's value **before** overwriting it (so the diff is real), then writes the new value; `peekSnapshot()` is a read-only variant used by the detail panel so merely *viewing* an instrument never moves your "last seen" baseline.
-- `ChangeDetectionService` — the anomaly engine described in §1; persists only *meaningful* verdicts to `detected_changes` as an audit trail.
+- `MarketDataService` — the only place that knows STOCK reads from `stock_prices` and FUND from `fund_navs`; also the seam where "current price" is sourced from the simulated feed. `getLatestMarketDataBatch()` fetches every stock/fund entity for a whole watchlist in two queries total, not one per item.
+- `SnapshotService` — owns `watchlist_snapshots`. `recordCheck()` reads the existing snapshot's value **before** overwriting it (so the diff is real), then writes the new value; `peekSnapshot()` is a read-only variant used by the detail panel so merely *viewing* an instrument never moves your "last seen" baseline. Concurrent checks on the same item are serialized by a pessimistic row lock taken in `WatchlistService.checkWatchlist()` before this runs — see §11/§13.
+- `ChangeDetectionService` — the anomaly engine described in §1; persists only *meaningful* verdicts to `detected_changes` as a deduplicated audit trail (at most one row per distinct symbol/date/changeType ever observed, not one per time someone looked). `detectBatch()` computes every stock's signal in a single query for the whole watchlist; `countPriorDetections()` is the table's one read use, surfaced in the detail panel.
 - `EventCorrelationService` — matches a detected change's date to a planted `MarketEvent` on the same symbol, within a ±3-day window (`CORRELATION_WINDOW_DAYS`). **Known limitation:** sector-scope events (e.g. "IT sector rallies") are stored with a `NULL` symbol column by the data loader (see `schema.sql`'s own comment), so this service only correlates direct stock/fund-symbol events — a member stock of an affected sector will correctly show "no recorded event" rather than a guessed match.
 - `SuggestionService` — rule-based (no ML), only produces output for meaningful changes, and its own test suite explicitly checks that no suggestion ever contains "buy", "sell", "invest", or similar prescriptive language.
 - `TickSimulationService` — see §10.
@@ -143,7 +143,7 @@ Two independent data paths worth calling out explicitly, because keeping them se
 - **`AttentionSection.jsx` / `AttentionCard.jsx`** — "What changed", with a loading/error/empty state (`StatusStates.jsx`) for "nothing important changed" as a normal, non-error outcome.
 - **`SinceLastCheckPanel.jsx`** — the detailed per-instrument since-last-check breakdown (previous → current, ₹/% delta, time elapsed, volume ratio, Normal/Unusual).
 - **`SeverityLegend.jsx`** — a plain-language explainer for Minor/Attention/High attention and what σ means.
-- **`InstrumentDetailPanel.jsx`** — slide-over panel; builds its own SVG sparkline from `PricePointResponse[]` (no charting library), and a second, separately-labeled live intraday sparkline from ticks received while it's open.
+- **`InstrumentDetailPanel.jsx`** — slide-over panel; builds its own SVG sparkline from `PricePointResponse[]` (no charting library), a second, separately-labeled live intraday sparkline from ticks received while it's open, and a "flagged N times before" note sourced from `detected_changes`' one real read use.
 - **`WatchlistToolbar.jsx`** — search, Add/Edit toggles, "Check for changes", and the live-feed status badge (green "Simulated live data" / amber "Reconnecting to live feed…").
 - **`CreateWatchlistModal.jsx`, `AddItemForm.jsx`, `WatchlistTabs.jsx`, `AppHeader.jsx`** — creation, adding, tab-switching, and global search UI.
 - Responsive behavior is handled with a single `@media (max-width: 720px)` breakpoint in `index.css` (header wraps, table scrolls horizontally, detail panel goes full-width) — no responsive framework.
@@ -190,8 +190,10 @@ Suggested actions (`SuggestionService`) follow a simple philosophy:
 | No ML | The detection is deterministic statistics (z-scores, category comparisons) — genuinely explainable in a 5-minute demo, which a black-box model wouldn't be. |
 | SSE, not WebSockets | Only server→browser updates are needed; `SseEmitter` + `EventSource` are already bundled with `spring-boot-starter-webmvc` and the browser respectively — no new dependency for a one-directional need. |
 | In-memory tick simulation | Single hackathon instance, no multi-node coordination problem exists yet to solve (see §12 / `docs/SCALABILITY.md`). |
-| Snapshot = last-write-wins | `watchlist_snapshots` has one row per item; each `/check` simply overwrites it. With a single browser session per demo user, there's no real conflict to resolve, and adding version vectors or optimistic locking here would be complexity without a corresponding problem. |
+| Snapshot state is stateless-server + PostgreSQL, genuinely multi-device | `watchlist_snapshots` is the single source of truth in the DB — any device/browser hitting the same `userId` sees the same state, since nothing is cached in server memory per-session. Concurrent writes to the SAME item (two tabs, two devices, a double-click) are handled explicitly: `checkWatchlist()` takes a pessimistic row lock (`findByIdForUpdate`) on the item before reading/writing its snapshot, so a second concurrent check correctly serializes behind the first rather than racing it — see §13. |
 | Sector-scope events not correlated | The data loader stores `NULL` for the symbol column on sector-scope rows (by design, per `schema.sql`), so there's no queryable link from a sector event to its member stocks without either a schema change or fragile text-parsing of the event description — neither of which was judged worth it for 2 of the 10 events. |
+| Batched DB lookups for larger watchlists, not a full rewrite | `getWatchlist()`, `listWatchlists()`, and `detectChanges()` used to issue one query per item. All three now batch (2 queries total regardless of watchlist size for market data/item counts; a single `PARTITION BY symbol` query for stock detection, verified to produce numerically identical results to the old per-symbol query). Fund detection deliberately stays per-symbol — batching its category-peer comparison safely would need a materially more complex rewrite, and funds are a minority of a typical watchlist (15 of 51 instruments in this dataset). |
+| `detected_changes` writes are deduplicated, and now have one real read use | Originally this table gained a new row every single time a meaningful verdict was recomputed (every page load, every check) — unbounded growth for data nobody asked to see duplicated. `persist()` now dedupes on (symbol, date, changeType), and the table has one genuine, lightweight read use: a "flagged N times before" count shown in the instrument detail panel — not a fake feature, just giving already-collected data an actual purpose. |
 
 ### 12. Scalability
 
@@ -212,12 +214,14 @@ Suggested actions (`SuggestionService`) follow a simple philosophy:
 
 | Case | Handling |
 |---|---|
+| Concurrent "Check for changes" on the same item (two tabs/devices, a double-click) | `checkWatchlist()` takes a pessimistic row lock on the item (`findByIdForUpdate`) before reading/writing its snapshot — the second call blocks until the first commits, then correctly sees the first's write as its own "previous" value, rather than racing a stale read. Covered by `SnapshotConcurrencyTest` (real multi-threaded test, not a mocked race). |
+| Concurrent "add this symbol" on the same watchlist | The same-request duplicate check (`DuplicateItemException` → 409) can't fully close a true race between two simultaneous adds; the database's own unique constraint is the real backstop, and a new `GlobalExceptionHandler` mapping turns that constraint violation into the same clean 409 instead of a raw 500. |
 | SSE disconnect/reconnect | Browser auto-retry + visible "Reconnecting…" badge (§10) |
 | SSE subscriber cleanup | `TrackedEmitter` + completion/timeout/error callbacks (§10) — covered by `TickSimulationServiceTest` |
 | Stale/deleted watchlist still selected in the UI | On a 404 from add/remove/check, the frontend re-fetches the watchlist list and drops the dead selection automatically |
 | Invalid ownership (another user's watchlist id) | `UnauthorizedAccessException` → HTTP 403, on every watchlist-scoped endpoint |
 | Watchlist/symbol not found | `ResourceNotFoundException` → HTTP 404 |
-| Duplicate instrument on the same watchlist | `DuplicateItemException` → HTTP 409 |
+| Duplicate instrument on the same watchlist (same request) | `DuplicateItemException` → HTTP 409 |
 | Empty watchlist | Explicit "no instruments yet" empty state, not a blank table |
 | No watchlists at all | Explicit "create one to start tracking" empty state |
 | First-ever check on an item (no baseline) | Surfaced as "baseline recorded," not a fabricated 0% diff |
@@ -225,10 +229,11 @@ Suggested actions (`SuggestionService`) follow a simple philosophy:
 | Insufficient trailing history (new-ish symbol) | Detector returns "not enough history yet" rather than a false verdict |
 | Detail panel viewed but not "checked" | `peekSnapshot()` is read-only — opening the panel never moves your last-seen baseline |
 | Global search vs. watchlist search | Kept as two independent state variables/inputs so typing in one never filters the other |
+| Larger watchlists (more items per watchlist) | `getWatchlist()`/`listWatchlists()`/`detectChanges()` batch their DB lookups instead of querying per item — see §11 and §14's regression tests |
 
 ### 14. Testing
 
-**Backend** — 11 JUnit 5 test classes, ~50 `@Test`-annotated methods (one of which is a `@ParameterizedTest` expanding across the 6 planted stock-scope events, and one intentionally `@Disabled` with an explanatory comment documenting the sector-event limitation from §5/§11 rather than silently skipping it):
+**Backend** — 16 JUnit 5 test classes, ~65 `@Test`-annotated methods (one of which is a `@ParameterizedTest` expanding across the 6 planted stock-scope events, and one intentionally `@Disabled` with an explanatory comment documenting the sector-event limitation from §5/§11 rather than silently skipping it):
 
 | Test class | Covers |
 |---|---|
@@ -238,15 +243,19 @@ Suggested actions (`SuggestionService`) follow a simple philosophy:
 | `MarketDataInstrumentListingTest` | The global search reference list matches the real 36+15 seeded instruments |
 | `EventCorrelationServiceTest` | Direct stock/fund event matches, correlation window boundaries, and the documented sector-event limitation |
 | `SuggestionServiceTest` | Suggestions only appear for meaningful changes and never contain prescriptive language |
-| `WatchlistServiceInstrumentDetailTest` | Detail panel assembly, read-only since-last-check behavior, ownership checks |
+| `WatchlistServiceInstrumentDetailTest` | Detail panel assembly, read-only since-last-check behavior, ownership checks, `priorDetectionCount` wiring |
 | `SnapshotDiffAccuracyTest` | Regression coverage proving the since-last-check diff is computed from the pre-check snapshot value, not the post-check one — including a positive and a negative move |
 | `TickSimulationServiceTest` | Tick bounds stay within real OHLC/NAV ranges, the walk actually moves, `asOfDate` stability, subscriber count bookkeeping on complete/error |
 | `WatchlistServiceLiveTicksTest` | Ownership enforcement on the `/live` SSE endpoint |
+| `SnapshotConcurrencyTest` | **Real multi-threaded** regression test (not mocked) proving concurrent "Check for changes" calls on the same item never race — exactly one concurrent first-ever check wins and reports `firstView=true`, the rest correctly serialize behind it |
+| `ChangeDetectionBatchEquivalenceTest` | The batched stock-detection query produces numerically identical verdicts to the old per-symbol query, across a cross-section including a known-anomalous symbol |
+| `BatchQueryRegressionTest` | Batched market-data lookups and grouped watchlist item counts match the old per-item approach exactly, including a zero-item watchlist |
+| `DetectedChangeAuditTrailTest` | Repeatedly detecting the same verdict does not grow `detected_changes`; a never-flagged symbol has zero prior detections |
 | `SmartWatchlistApplicationTests` | Spring context loads |
 
-A prior local run reported 56 executed tests with 2 failures, both isolated to SSE subscriber cleanup in `TickSimulationServiceTest` (an emitter completed directly in a unit test, outside a live HTTP request, wasn't deregistering). That was root-caused and fixed by having `subscribe()` return a small `TrackedEmitter` that deregisters synchronously on `complete()`/`completeWithError()`, in addition to the existing completion callbacks used for real client disconnects. Re-run `mvnw.cmd test` to confirm the fix on your machine — this README does not assert a specific latest pass/fail count it hasn't itself observed.
+A prior local run reported 56 executed tests with 2 failures, both isolated to SSE subscriber cleanup in `TickSimulationServiceTest` (an emitter completed directly in a unit test, outside a live HTTP request, wasn't deregistering). That was root-caused and fixed by having `subscribe()` return a small `TrackedEmitter` that deregisters synchronously on `complete()`/`completeWithError()`, in addition to the existing completion callbacks used for real client disconnects. This README does not assert a fresh, fully-confirmed pass/fail count for the subsequent performance/concurrency work above beyond what's been directly observed — run `mvnw.cmd test` to confirm on your machine.
 
-**Frontend** — 45 test cases in `App.test.jsx` (Vitest + React Testing Library), grouped into: core user journey (watchlist load/add/remove/edit/delete/check), global instrument search, stale-watchlist recovery, since-last-check panel, severity legend, instrument detail panel, and the simulated live feed (subscription lifecycle, reconnect badge, table price updates without touching the 1D-change column). `npm run build` succeeds.
+**Frontend** — 47 test cases in `App.test.jsx` (Vitest + React Testing Library), grouped into: core user journey (watchlist load/add/remove/edit/delete/check), global instrument search, stale-watchlist recovery, since-last-check panel, severity legend, instrument detail panel (including the detection-history count), and the simulated live feed (subscription lifecycle, reconnect badge, table price updates without touching the 1D-change column). `npm run build` succeeds.
 
 ### 15. What We Deliberately Did NOT Build
 

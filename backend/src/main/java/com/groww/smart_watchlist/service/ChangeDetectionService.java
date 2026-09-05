@@ -88,6 +88,83 @@ public class ChangeDetectionService {
         return buildStockVerdict(symbol, stockPriceRepository.findLatestStockSignal(symbol));
     }
 
+    /**
+     * Batched counterpart to {@link #detect} for a whole watchlist's worth
+     * of symbols at once — replaces the N+1 pattern where
+     * WatchlistService.detectChanges() used to call detect() once per item
+     * (one native query per stock). Stocks are computed via a single
+     * multi-symbol query (StockPriceRepository.findLatestStockSignalsBatch,
+     * PARTITION BY symbol instead of one WHERE-clause query per symbol) —
+     * verified manually against the loaded dataset to produce numerically
+     * IDENTICAL z-scores/volume-ratios to the per-symbol query, so this is
+     * purely a round-trip reduction, not a behavior change.
+     *
+     * Funds are deliberately NOT batched here: batching the category-peer
+     * comparison across multiple fund symbols at once would require
+     * rewriting the peer-average/stddev computation to key off each fund's
+     * OWN category (not just a shared WHERE clause), which is materially
+     * more complex to get right without risking a subtle regression in the
+     * ground-truth-validated detection logic. With at most 15 funds in this
+     * dataset (vs 36 stocks), the stock-side batching already covers the
+     * majority of a typical watchlist's query cost; funds keep the existing
+     * per-symbol call. This is a deliberate, disclosed scope decision, not
+     * an oversight — see docs/SCALABILITY.md.
+     *
+     * Persists meaningful verdicts exactly as {@link #detect} does.
+     */
+    @Transactional
+    public Map<String, DetectedChangeResponse> detectBatch(List<String> stockSymbols, List<String> fundSymbols) {
+        Map<String, DetectedChangeResponse> results = new LinkedHashMap<>();
+
+        if (!stockSymbols.isEmpty()) {
+            List<Object[]> rows = stockPriceRepository.findLatestStockSignalsBatch(stockSymbols);
+            Map<String, Object[]> rowBySymbol = new LinkedHashMap<>();
+            for (Object[] row : rows) {
+                rowBySymbol.put((String) row[0], dropLeadingSymbolColumn(row));
+            }
+            for (String symbol : stockSymbols) {
+                Object[] row = rowBySymbol.get(symbol);
+                // Explicit type witnesses (List.<Object[]>of(...)) are required
+                // here, not just an explicitly-typed local variable — a bare
+                // `List.of(row)` where row's static type is already Object[]
+                // hits a well-known Java varargs ambiguity: List.of(E...)
+                // treats a single array-typed argument as THE VARARGS ARRAY
+                // ITSELF (spreading its elements as individual entries, E
+                // inferred as Object) rather than wrapping it as one element,
+                // regardless of the assignment's target type. The explicit
+                // <Object[]> witness forces E=Object[] before that ambiguity
+                // can apply, so row is correctly wrapped as a single element.
+                List<Object[]> rowAsList = row == null ? List.<Object[]>of() : List.<Object[]>of(row);
+                DetectedChangeResponse verdict = buildStockVerdict(symbol, rowAsList);
+                if (verdict.meaningful()) {
+                    persist(verdict);
+                }
+                results.put(symbol, verdict);
+            }
+        }
+
+        // Not batched — see javadoc above.
+        for (String symbol : fundSymbols) {
+            DetectedChangeResponse verdict = detectFundChange(symbol);
+            if (verdict.meaningful()) {
+                persist(verdict);
+            }
+            results.put(symbol, verdict);
+        }
+
+        return results;
+    }
+
+    // The batch query's row shape is (symbol, trade_date, close, ...) — one
+    // extra leading column vs. the single-symbol query's (trade_date, close,
+    // ...). Stripping it lets buildStockVerdict's existing, already-tested
+    // index-based parsing work completely unchanged for either code path.
+    private Object[] dropLeadingSymbolColumn(Object[] row) {
+        Object[] withoutSymbol = new Object[row.length - 1];
+        System.arraycopy(row, 1, withoutSymbol, 0, withoutSymbol.length);
+        return withoutSymbol;
+    }
+
     private DetectedChangeResponse buildStockVerdict(String symbol, List<Object[]> rows) {
         if (rows.isEmpty()) {
             return insufficientData(symbol, InstrumentType.STOCK, "No price history for " + symbol + " yet.");
@@ -216,7 +293,21 @@ public class ChangeDetectionService {
                 true, changeType, severity.setScale(3, RoundingMode.HALF_UP), explanation, metrics);
     }
 
+    /**
+     * Writes a meaningful verdict to detected_changes — but only once per
+     * (symbol, detected_date, changeType). Previously this inserted a new
+     * row every single time detect() was called (every page load, every
+     * check, every watchlist switch), so the "audit trail" grew without
+     * bound purely from repeated reads of the SAME verdict. This is now a
+     * real, bounded audit trail: at most one row per distinct verdict ever
+     * actually observed, not one row per time someone looked.
+     */
     private void persist(DetectedChangeResponse result) {
+        boolean alreadyRecorded = detectedChangeRepository.existsBySymbolAndDetectedDateAndChangeType(
+                result.symbol(), result.asOfDate(), result.changeType());
+        if (alreadyRecorded) {
+            return;
+        }
         DetectedChange entity = new DetectedChange();
         entity.setSymbol(result.symbol());
         entity.setInstrumentType(result.instrumentType());
@@ -225,6 +316,18 @@ public class ChangeDetectionService {
         entity.setSeverityScore(result.severityScore());
         entity.setExplanation(result.explanation());
         detectedChangeRepository.save(entity);
+    }
+
+    /**
+     * The one real read use of detected_changes: how many times has this
+     * symbol EVER been recorded with a meaningful verdict, across any
+     * trading day — surfaced in the instrument detail panel as "flagged N
+     * times before" so a repeat flag reads as a stronger signal than a
+     * one-off blip. Deliberately just a count, not a full history list —
+     * keeps this simple rather than building a history UI nobody asked for.
+     */
+    public long countPriorDetections(String symbol) {
+        return detectedChangeRepository.countBySymbol(symbol);
     }
 
     private DetectedChangeResponse insufficientData(String symbol, InstrumentType type, String message) {

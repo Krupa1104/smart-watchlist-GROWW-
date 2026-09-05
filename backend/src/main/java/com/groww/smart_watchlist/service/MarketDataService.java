@@ -17,8 +17,11 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.math.BigDecimal;
 
 // Deliberately the only place in the app that knows "STOCK reads from
@@ -89,6 +92,50 @@ public class MarketDataService {
     }
 
     /**
+     * Batched counterpart to {@link #getLatestMarketData} for a whole
+     * watchlist's worth of symbols — replaces the N+1 pattern where
+     * WatchlistService.getWatchlist() used to call getLatestMarketData()
+     * once per item, each doing its own stockRepository.findById/
+     * fundRepository.findById round trip. Fetches every stock and every
+     * fund entity for the given symbols in exactly two queries total
+     * (findAllById), regardless of how many items the watchlist has, then
+     * builds each response the same way getLatestMarketData() always has.
+     *
+     * The simulated-price lookup itself (TickSimulationService) is NOT
+     * batched here — it's already an in-memory map read after a symbol's
+     * first access (see that class), so there's no per-request DB cost
+     * left to batch away; only the Stock/Fund entity lookups were an
+     * actual per-item DB round trip.
+     */
+    public Map<String, MarketDataResponse> getLatestMarketDataBatch(List<String> stockSymbols, List<String> fundSymbols) {
+        Map<String, MarketDataResponse> results = new LinkedHashMap<>();
+
+        if (!stockSymbols.isEmpty()) {
+            Map<String, Stock> stocksBySymbol = stockRepository.findAllById(stockSymbols).stream()
+                    .collect(Collectors.toMap(Stock::getSymbol, s -> s));
+            for (String symbol : stockSymbols) {
+                Stock stock = stocksBySymbol.get(symbol);
+                if (stock != null) { // defensive: a watchlist item should always resolve, but never NPE if data drifts
+                    results.put(symbol, buildStockMarketData(symbol, stock));
+                }
+            }
+        }
+
+        if (!fundSymbols.isEmpty()) {
+            Map<String, Fund> fundsBySymbol = fundRepository.findAllById(fundSymbols).stream()
+                    .collect(Collectors.toMap(Fund::getSymbol, f -> f));
+            for (String symbol : fundSymbols) {
+                Fund fund = fundsBySymbol.get(symbol);
+                if (fund != null) {
+                    results.put(symbol, buildFundMarketData(symbol, fund));
+                }
+            }
+        }
+
+        return results;
+    }
+
+    /**
      * Recent daily history for the instrument detail panel — oldest first,
      * so the frontend can plot it left-to-right without re-sorting. Reuses
      * the existing findBySymbolOrderBy*Desc queries (no new SQL, no schema
@@ -127,7 +174,10 @@ public class MarketDataService {
     private MarketDataResponse getLatestStockData(String symbol) {
         Stock stock = stockRepository.findById(symbol)
                 .orElseThrow(() -> new ResourceNotFoundException("Stock not found: " + symbol));
+        return buildStockMarketData(symbol, stock);
+    }
 
+    private MarketDataResponse buildStockMarketData(String symbol, Stock stock) {
         Optional<BigDecimal> simulatedPrice = tickSimulationService.getCurrentPrice(symbol, InstrumentType.STOCK);
         return simulatedPrice
                 .map(price -> new MarketDataResponse(
@@ -150,7 +200,10 @@ public class MarketDataService {
     private MarketDataResponse getLatestFundData(String symbol) {
         Fund fund = fundRepository.findById(symbol)
                 .orElseThrow(() -> new ResourceNotFoundException("Fund not found: " + symbol));
+        return buildFundMarketData(symbol, fund);
+    }
 
+    private MarketDataResponse buildFundMarketData(String symbol, Fund fund) {
         Optional<BigDecimal> simulatedPrice = tickSimulationService.getCurrentPrice(symbol, InstrumentType.FUND);
         return simulatedPrice
                 .map(price -> new MarketDataResponse(

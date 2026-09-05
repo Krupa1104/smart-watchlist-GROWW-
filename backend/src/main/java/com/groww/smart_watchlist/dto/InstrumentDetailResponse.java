@@ -18,6 +18,7 @@ public record InstrumentDetailResponse(
         DetectedChangeResponse detectedChange,
         SnapshotDiffResponse sinceLastCheck, // firstView=true if this item has never been checked before
         RelatedEventResponse relatedEvent,   // null when no planted event falls within the correlation window
-        List<String> suggestedActions        // empty when the detected change isn't meaningful
+        List<String> suggestedActions,       // empty when the detected change isn't meaningful
+        long priorDetectionCount             // how many DISTINCT meaningful verdicts are on record for this symbol, ever (see ChangeDetectionService.countPriorDetections) — 0 is a normal, common value
 ) {
 }

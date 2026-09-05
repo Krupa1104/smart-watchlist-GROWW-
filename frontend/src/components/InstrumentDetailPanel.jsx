@@ -216,6 +216,12 @@ export default function InstrumentDetailPanel({ watchlistId, symbol, onClose, li
                   {formatDate(detected.asOfDate)}
                 </p>
               )}
+              {detail.priorDetectionCount > 0 && (
+                <p className="detail-panel__meta">
+                  Flagged {detail.priorDetectionCount} time{detail.priorDetectionCount === 1 ? '' : 's'} in the
+                  recorded detection history.
+                </p>
+              )}
             </section>
 
             <section className="detail-panel__section">

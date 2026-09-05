@@ -147,6 +147,7 @@ const INSTRUMENT_DETAIL = {
     'No recorded event found — treat this as a statistical anomaly and verify independently.',
     'Monitor this instrument closely over the next few sessions before drawing conclusions.',
   ],
+  priorDetectionCount: 3,
 };
 
 function setupDefaultMocks({ attention = [], detected = DETECTED, summaries = SUMMARIES } = {}) {
@@ -739,6 +740,34 @@ describe('App — instrument detail panel', () => {
     expect(
       within(dialog).getByText(/monitor this instrument closely/i)
     ).toBeInTheDocument();
+    expect(within(dialog).getByText(/flagged 3 times in the recorded detection history/i)).toBeInTheDocument();
+  });
+
+  it('does not show a detection-history note when the instrument has never been flagged before', async () => {
+    setupDefaultMocks();
+    api.getInstrumentDetail.mockResolvedValue({ ...INSTRUMENT_DETAIL, priorDetectionCount: 0 });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByText('STK01'));
+
+    const dialog = await screen.findByRole('dialog', { name: /STK01/i });
+    await within(dialog).findByText('Acme Corp');
+    expect(within(dialog).queryByText(/recorded detection history/i)).not.toBeInTheDocument();
+  });
+
+  it('uses singular phrasing when flagged exactly once before', async () => {
+    setupDefaultMocks();
+    api.getInstrumentDetail.mockResolvedValue({ ...INSTRUMENT_DETAIL, priorDetectionCount: 1 });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByText('STK01'));
+
+    const dialog = await screen.findByRole('dialog', { name: /STK01/i });
+    expect(await within(dialog).findByText(/flagged 1 time in the recorded detection history/i)).toBeInTheDocument();
   });
 
   it('shows a related event when one is present, instead of the no-event message', async () => {

@@ -87,5 +87,45 @@ public interface StockPriceRepository extends JpaRepository<StockPrice, Long> {
             WHERE trade_date = :asOfDate
             """, nativeQuery = true)
     List<Object[]> findStockSignalAsOf(@Param("symbol") String symbol, @Param("asOfDate") LocalDate asOfDate);
+
+    // Batched counterpart to findLatestStockSignal — computes the exact same
+    // rolling z-score/volume-ratio statistics for MULTIPLE symbols in ONE
+    // round trip instead of one query per symbol (the N+1 pattern this
+    // replaces in WatchlistService.detectChanges()). Verified manually
+    // against the loaded dataset to produce numerically IDENTICAL results
+    // to calling findLatestStockSignal once per symbol — this only changes
+    // PARTITION BY symbol instead of a per-symbol WHERE clause, then keeps
+    // just the latest row per symbol (rn = 1); the statistical formula
+    // itself is untouched.
+    // Row shape: 0 symbol, 1 trade_date, 2 close, 3 daily_return,
+    // 4 avg_return_20d, 5 stddev_return_20d, 6 return_z_score, 7 volume,
+    // 8 avg_volume_20d, 9 volume_ratio
+    @Query(value = """
+            WITH price_stats AS (
+                SELECT symbol, trade_date, close, volume,
+                       (close - LAG(close) OVER (PARTITION BY symbol ORDER BY trade_date))
+                         / NULLIF(LAG(close) OVER (PARTITION BY symbol ORDER BY trade_date), 0) AS daily_return
+                FROM stock_prices
+                WHERE symbol IN (:symbols)
+            ),
+            rolling AS (
+                SELECT symbol, trade_date, close, volume, daily_return,
+                       AVG(daily_return) OVER (PARTITION BY symbol ORDER BY trade_date
+                           ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS avg_return_20d,
+                       STDDEV(daily_return) OVER (PARTITION BY symbol ORDER BY trade_date
+                           ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS stddev_return_20d,
+                       AVG(volume) OVER (PARTITION BY symbol ORDER BY trade_date
+                           ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) AS avg_volume_20d,
+                       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY trade_date DESC) AS rn
+                FROM price_stats
+            )
+            SELECT symbol, trade_date, close, daily_return, avg_return_20d, stddev_return_20d,
+                   (daily_return - avg_return_20d) / NULLIF(stddev_return_20d, 0) AS return_z_score,
+                   volume, avg_volume_20d,
+                   volume / NULLIF(avg_volume_20d, 0) AS volume_ratio
+            FROM rolling
+            WHERE rn = 1
+            """, nativeQuery = true)
+    List<Object[]> findLatestStockSignalsBatch(@Param("symbols") List<String> symbols);
 }
 

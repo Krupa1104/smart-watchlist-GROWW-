@@ -155,6 +155,10 @@ class WatchlistServiceInstrumentDetailTest {
         assertTrue(detail.suggestedActions().stream()
                         .anyMatch(s -> s.toLowerCase().contains("no recorded event")),
                 "with no related event, suggestions should say so explicitly rather than imply one exists");
+        // priorDetectionCount wires through getInstrumentDetail() end-to-end
+        // (see DetectedChangeAuditTrailTest for the dedup behavior itself)
+        assertTrue(detail.priorDetectionCount() >= 1,
+                "detecting STK04 here should have just recorded (or already have recorded) at least one prior detection");
     }
 
     @Test

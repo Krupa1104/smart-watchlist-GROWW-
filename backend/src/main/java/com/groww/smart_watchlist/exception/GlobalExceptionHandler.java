@@ -1,5 +1,6 @@
 package com.groww.smart_watchlist.exception;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -40,6 +41,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, Object>> handleIllegalArgument(IllegalArgumentException ex) {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    // Covers a race the application-level DuplicateItemException check
+    // can't fully close on its own: two concurrent "add this symbol" calls
+    // can both pass the "does it already exist" check before either
+    // commits, so the SECOND insert fails at the database's own unique
+    // constraint (watchlist_id, symbol) instead. Without this handler that
+    // would surface as a raw 500 with an internal stack trace; this turns
+    // it into the same clean 409 a same-request duplicate already gets.
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
+        return build(HttpStatus.CONFLICT, "This request conflicts with another change made at the same time. Please retry.");
     }
 
     private ResponseEntity<Map<String, Object>> build(HttpStatus status, String message) {

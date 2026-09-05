@@ -11,6 +11,7 @@ import com.groww.smart_watchlist.dto.SnapshotDiffResponse;
 import com.groww.smart_watchlist.dto.WatchlistItemResponse;
 import com.groww.smart_watchlist.dto.WatchlistResponse;
 import com.groww.smart_watchlist.dto.WatchlistSummaryResponse;
+import com.groww.smart_watchlist.entity.InstrumentType;
 import com.groww.smart_watchlist.entity.User;
 import com.groww.smart_watchlist.entity.Watchlist;
 import com.groww.smart_watchlist.entity.WatchlistItem;
@@ -26,7 +27,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDate;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -77,28 +80,46 @@ public class WatchlistService {
         return toSummary(saved, 0);
     }
 
+    /**
+     * Item counts for every one of the user's watchlists in TWO queries
+     * total (findByUserId + one grouped count), not one count query per
+     * watchlist — see WatchlistItemRepository.countItemsGroupedByWatchlistId.
+     */
     @Transactional(readOnly = true)
     public List<WatchlistSummaryResponse> listWatchlists(Integer userId) {
         ensureUserExists(userId);
-        return watchlistRepository.findByUserId(userId).stream()
-                .map(w -> toSummary(w, watchlistItemRepository.findByWatchlistId(w.getId()).size()))
+        List<Watchlist> watchlists = watchlistRepository.findByUserId(userId);
+        if (watchlists.isEmpty()) {
+            return List.of();
+        }
+
+        List<Integer> watchlistIds = watchlists.stream().map(Watchlist::getId).toList();
+        Map<Integer, Integer> itemCountsById = new HashMap<>();
+        for (Object[] row : watchlistItemRepository.countItemsGroupedByWatchlistId(watchlistIds)) {
+            itemCountsById.put((Integer) row[0], ((Number) row[1]).intValue());
+        }
+
+        return watchlists.stream()
+                .map(w -> toSummary(w, itemCountsById.getOrDefault(w.getId(), 0)))
                 .toList();
     }
 
+    /**
+     * Fetches every item's current market data in TWO queries total
+     * (one batch for stocks, one for funds) instead of one query per item
+     * — see MarketDataService.getLatestMarketDataBatch.
+     */
     @Transactional(readOnly = true)
     public WatchlistResponse getWatchlist(Integer watchlistId, Integer userId) {
         Watchlist watchlist = loadOwnedWatchlist(watchlistId, userId);
         List<WatchlistItem> items = watchlistItemRepository.findByWatchlistId(watchlistId);
+        Map<String, MarketDataResponse> marketDataBySymbol = fetchMarketDataBatch(items);
 
         List<WatchlistItemResponse> itemResponses = items.stream()
-                .map(item -> {
-                    MarketDataResponse marketData =
-                            marketDataService.getLatestMarketData(item.getSymbol(), item.getInstrumentType());
-                    return new WatchlistItemResponse(
-                            item.getId(), item.getSymbol(), item.getInstrumentType(),
-                            item.getAddedAt(), marketData
-                    );
-                })
+                .map(item -> new WatchlistItemResponse(
+                        item.getId(), item.getSymbol(), item.getInstrumentType(),
+                        item.getAddedAt(), marketDataBySymbol.get(item.getSymbol())
+                ))
                 .toList();
 
         LocalDate dataAsOf = itemResponses.stream()
@@ -143,8 +164,14 @@ public class WatchlistService {
      * current value, diff it against whatever was last seen, then overwrite
      * the snapshot with the current value. This is deliberately separate
      * from getWatchlist() (read-only) — see SnapshotService for why.
-     * Phase 3's ChangeDetectionService will sit on top of this same method,
-     * turning each raw diff into a "meaningful or not" verdict.
+     *
+     * Concurrency: each item's row is locked (findByIdForUpdate) BEFORE its
+     * snapshot is read, so two concurrent checks for the SAME item (two
+     * browser tabs, two devices, a double-click) can never race on the
+     * read-then-write — the second call blocks until the first commits,
+     * then correctly reads the first's just-written value as its own
+     * "previous", rather than a stale read taken before either wrote. See
+     * WatchlistItemRepository.findByIdForUpdate and SnapshotConcurrencyTest.
      */
     @Transactional
     public List<SnapshotDiffResponse> checkWatchlist(Integer watchlistId, Integer userId) {
@@ -153,9 +180,11 @@ public class WatchlistService {
 
         return items.stream()
                 .map(item -> {
+                    WatchlistItem lockedItem = watchlistItemRepository.findByIdForUpdate(item.getId())
+                            .orElse(item); // deleted concurrently mid-check — fall back rather than NPE
                     MarketDataResponse marketData =
-                            marketDataService.getLatestMarketData(item.getSymbol(), item.getInstrumentType());
-                    return snapshotService.recordCheck(item, marketData);
+                            marketDataService.getLatestMarketData(lockedItem.getSymbol(), lockedItem.getInstrumentType());
+                    return snapshotService.recordCheck(lockedItem, marketData);
                 })
                 .toList();
     }
@@ -167,14 +196,35 @@ public class WatchlistService {
      * (funds), which has nothing to do with what this particular user last
      * saw. Phase 4's digest endpoint will combine this with checkWatchlist()
      * output to decide what to actually show the user.
+     *
+     * Stock signals are computed in ONE batched query for the whole
+     * watchlist instead of one query per stock — see
+     * ChangeDetectionService.detectBatch. Funds remain per-symbol (same
+     * method as before); see detectBatch's javadoc for why.
      */
     @Transactional
     public List<DetectedChangeResponse> detectChanges(Integer watchlistId, Integer userId) {
         loadOwnedWatchlist(watchlistId, userId);
         List<WatchlistItem> items = watchlistItemRepository.findByWatchlistId(watchlistId);
 
+        List<String> stockSymbols = items.stream()
+                .filter(i -> i.getInstrumentType() == InstrumentType.STOCK)
+                .map(WatchlistItem::getSymbol)
+                .toList();
+        List<String> fundSymbols = items.stream()
+                .filter(i -> i.getInstrumentType() == InstrumentType.FUND)
+                .map(WatchlistItem::getSymbol)
+                .toList();
+
+        Map<String, DetectedChangeResponse> verdictsBySymbol =
+                changeDetectionService.detectBatch(stockSymbols, fundSymbols);
+
+        // Preserve the watchlist's own item order in the response, same as
+        // the previous per-item loop did — callers building a Map keyed by
+        // symbol (which is everything that consumes this today) don't care,
+        // but nothing should silently change order either.
         return items.stream()
-                .map(item -> changeDetectionService.detect(item.getSymbol(), item.getInstrumentType()))
+                .map(item -> verdictsBySymbol.get(item.getSymbol()))
                 .toList();
     }
 
@@ -237,10 +287,12 @@ public class WatchlistService {
                 eventCorrelationService.findRelatedEvent(normalizedSymbol, item.getInstrumentType(), detectedChange.asOfDate());
         List<String> suggestedActions = suggestionService.suggestActions(detectedChange, relatedEvent);
         SnapshotDiffResponse sinceLastCheck = buildSinceLastCheck(item, marketData);
+        long priorDetectionCount = changeDetectionService.countPriorDetections(normalizedSymbol);
 
         return new InstrumentDetailResponse(
                 normalizedSymbol, item.getInstrumentType(), marketData, recentHistory,
-                detectedChange, sinceLastCheck, relatedEvent.orElse(null), suggestedActions
+                detectedChange, sinceLastCheck, relatedEvent.orElse(null), suggestedActions,
+                priorDetectionCount
         );
     }
 
@@ -301,6 +353,18 @@ public class WatchlistService {
     private WatchlistSummaryResponse toSummary(Watchlist watchlist, int itemCount) {
         return new WatchlistSummaryResponse(
                 watchlist.getId(), watchlist.getName(), watchlist.getCreatedAt(), itemCount);
+    }
+
+    private Map<String, MarketDataResponse> fetchMarketDataBatch(List<WatchlistItem> items) {
+        List<String> stockSymbols = items.stream()
+                .filter(i -> i.getInstrumentType() == InstrumentType.STOCK)
+                .map(WatchlistItem::getSymbol)
+                .toList();
+        List<String> fundSymbols = items.stream()
+                .filter(i -> i.getInstrumentType() == InstrumentType.FUND)
+                .map(WatchlistItem::getSymbol)
+                .toList();
+        return marketDataService.getLatestMarketDataBatch(stockSymbols, fundSymbols);
     }
 
     /**
