@@ -9,6 +9,14 @@ export function listWatchlists(userId = DEMO_USER_ID) {
   return apiClient.get('/api/watchlists', { userId });
 }
 
+// Reference data (all stocks + funds that exist), not user-scoped — no
+// userId param, matching the backend's InstrumentController. Fetched once
+// on app load and filtered client-side for the global search (see
+// AppHeader.jsx) rather than re-queried per keystroke.
+export function listInstruments() {
+  return apiClient.get('/api/instruments');
+}
+
 export function createWatchlist(name, userId = DEMO_USER_ID) {
   return apiClient.post('/api/watchlists', { userId }, name ? { name } : undefined);
 }

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import App from './App.jsx';
@@ -81,8 +81,15 @@ const ATTENTION_ITEM = {
   metrics: { dailyReturn: 0.091, returnZScore: 3.2 },
 };
 
+const INSTRUMENTS = [
+  { symbol: 'STK01', instrumentType: 'STOCK', name: 'Acme Corp', groupLabel: 'IT' },
+  { symbol: 'STK09', instrumentType: 'STOCK', name: 'Beta Industries', groupLabel: 'Energy' },
+  { symbol: 'FUND01', instrumentType: 'FUND', name: 'Growth Fund', groupLabel: 'Equity' },
+];
+
 function setupDefaultMocks({ attention = [], detected = DETECTED, summaries = SUMMARIES } = {}) {
   api.listWatchlists.mockResolvedValue(summaries);
+  api.listInstruments.mockResolvedValue(INSTRUMENTS);
   api.getWatchlist.mockResolvedValue(WATCHLIST);
   api.detectChanges.mockResolvedValue(detected);
   api.getAttentionItems.mockResolvedValue(attention);
@@ -255,7 +262,7 @@ describe('App — core user journey', () => {
     await waitForSettled();
   });
 
-  it('creates a new watchlist and switches to it', async () => {
+  it('opens the naming dialog, lets the user rename, and creates+switches to it', async () => {
     setupDefaultMocks();
     const user = userEvent.setup();
     render(<App />);
@@ -263,8 +270,67 @@ describe('App — core user journey', () => {
     await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
     await user.click(screen.getByRole('button', { name: /\+ watchlist/i }));
 
-    await waitFor(() => expect(api.createWatchlist).toHaveBeenCalledTimes(1));
+    const nameInput = await screen.findByLabelText(/watchlist name/i);
+    expect(nameInput).toHaveValue('My Watchlist'); // sensible default, but editable
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Tech Picks');
+    await user.click(screen.getByRole('button', { name: /^create$/i }));
+
+    await waitFor(() => expect(api.createWatchlist).toHaveBeenCalledWith('Tech Picks'));
     await waitFor(() => expect(screen.getByText('New Watchlist')).toBeInTheDocument());
+    expect(screen.queryByLabelText(/watchlist name/i)).not.toBeInTheDocument(); // dialog closes after success
+    await waitForSettled();
+  });
+
+  it('creates nothing if watchlist creation is cancelled', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByRole('button', { name: /\+ watchlist/i }));
+    await screen.findByLabelText(/watchlist name/i);
+
+    await user.click(screen.getByRole('button', { name: /cancel/i }));
+
+    expect(screen.queryByLabelText(/watchlist name/i)).not.toBeInTheDocument();
+    expect(api.createWatchlist).not.toHaveBeenCalled();
+    await waitForSettled();
+  });
+
+  it('rejects an empty/whitespace-only watchlist name without calling the API', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByRole('button', { name: /\+ watchlist/i }));
+
+    const nameInput = await screen.findByLabelText(/watchlist name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, '   ');
+    await user.click(screen.getByRole('button', { name: /^create$/i }));
+
+    expect(await screen.findByText(/cannot be empty/i)).toBeInTheDocument();
+    expect(api.createWatchlist).not.toHaveBeenCalled();
+    await waitForSettled();
+  });
+
+  it('creating a second watchlist with a different name keeps both tabs independent', async () => {
+    setupDefaultMocks();
+    api.createWatchlist.mockResolvedValue({ id: 5, name: 'Dividend Picks', createdAt: '2026-08-24T00:00:00Z' });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByRole('button', { name: /\+ watchlist/i }));
+    const nameInput = await screen.findByLabelText(/watchlist name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Dividend Picks');
+    await user.click(screen.getByRole('button', { name: /^create$/i }));
+
+    await waitFor(() => expect(screen.getByText('Dividend Picks')).toBeInTheDocument());
+    expect(screen.getByText('My Watchlist')).toBeInTheDocument(); // original tab still there, untouched
     await waitForSettled();
   });
 
@@ -365,5 +431,149 @@ describe('App — core user journey', () => {
     // the watchlist must NOT have been removed from the UI on failure
     expect(screen.getByText('My Watchlist')).toBeInTheDocument();
     confirmSpy.mockRestore();
+  });
+});
+
+describe('App — global instrument search', () => {
+  it('shows matching stock and fund results as the user types, without adding anything', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.type(screen.getByLabelText('Search stocks, funds'), 'STK');
+
+    const listbox = await screen.findByRole('listbox');
+    await waitFor(() => {
+      expect(within(listbox).getByText('Acme Corp')).toBeInTheDocument();
+      expect(within(listbox).getByText('Beta Industries')).toBeInTheDocument();
+    });
+    expect(within(listbox).queryByText('Growth Fund')).not.toBeInTheDocument(); // FUND01 doesn't match "STK"
+    expect(api.addItem).not.toHaveBeenCalled();
+    await waitForSettled();
+  });
+
+  it('labels results by instrument type so stocks and funds are distinguishable', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    // "o" matches both "Acme Corp" (STOCK) and "Growth Fund" (FUND)
+    await user.type(screen.getByLabelText('Search stocks, funds'), 'o');
+
+    const listbox = await screen.findByRole('listbox');
+    const options = within(listbox).getAllByRole('option');
+    expect(options.length).toBeGreaterThan(0);
+    expect(
+      within(listbox).getAllByText('STOCK').length + within(listbox).getAllByText('FUND').length
+    ).toBe(options.length);
+    await waitForSettled();
+  });
+
+  it('shows a clear "no match" state for a query that matches nothing', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.type(screen.getByLabelText('Search stocks, funds'), 'zzz-nope');
+
+    await waitFor(() =>
+      expect(screen.getByText('No matching stocks or funds')).toBeInTheDocument()
+    );
+    await waitForSettled();
+  });
+
+  it('clearing the search removes the results dropdown', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    const searchInput = screen.getByLabelText('Search stocks, funds');
+    await user.type(searchInput, 'STK');
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeInTheDocument());
+
+    await user.clear(searchInput);
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());
+    await waitForSettled();
+  });
+
+  it('selecting a result opens the add form prefilled with that symbol and type, without calling addItem', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.type(screen.getByLabelText('Search stocks, funds'), 'growth');
+
+    const result = await screen.findByRole('option', { name: /growth fund/i });
+    await user.click(result);
+
+    expect(await screen.findByLabelText('Symbol')).toHaveValue('FUND01');
+    expect(screen.getByLabelText('Type')).toHaveValue('FUND');
+    expect(api.addItem).not.toHaveBeenCalled(); // selecting a result must not mutate the watchlist
+    // the dropdown itself is gone after selecting
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    await waitForSettled();
+  });
+
+  it('keeps the global instrument search independent from "Search your watchlist"', async () => {
+    setupDefaultMocks();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.type(screen.getByLabelText('Search stocks, funds'), 'growth');
+
+    const listbox = await screen.findByRole('listbox');
+    await waitFor(() => expect(within(listbox).getByText('Growth Fund')).toBeInTheDocument());
+    // the watchlist table itself is untouched by the global search
+    const table = screen.getByTestId('watchlist-table');
+    expect(within(table).getByText('STK01')).toBeInTheDocument();
+    expect(within(table).getByText('FUND01')).toBeInTheDocument();
+    await waitForSettled();
+  });
+});
+
+describe('App — stale watchlist recovery (Issue 3)', () => {
+  it('re-syncs the watchlist list and drops the stale selection when adding fails with a 404', async () => {
+    setupDefaultMocks();
+    const staleError = new Error('Watchlist not found: 1');
+    staleError.status = 404;
+    api.addItem.mockRejectedValueOnce(staleError);
+    // the recovery re-fetch returns a list that no longer contains id 1
+    api.listWatchlists.mockResolvedValueOnce(SUMMARIES).mockResolvedValueOnce([
+      { id: 3, name: 'Second List', createdAt: '2026-08-24T10:00:00Z', itemCount: 0 },
+    ]);
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByRole('button', { name: /\+ add stocks/i }));
+    await user.type(screen.getByLabelText('Symbol'), 'stk09');
+    await user.click(screen.getByRole('button', { name: /add to watchlist/i }));
+
+    await waitFor(() => expect(api.listWatchlists).toHaveBeenCalledTimes(2)); // initial load + recovery re-fetch
+    await waitFor(() => expect(screen.queryByText('My Watchlist')).not.toBeInTheDocument());
+    expect(screen.getByText('Second List')).toBeInTheDocument();
+  });
+
+  it('does not re-sync the watchlist list for a non-404 add failure', async () => {
+    setupDefaultMocks();
+    api.addItem.mockRejectedValueOnce(new Error('Could not reach the backend.'));
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByRole('button', { name: /\+ add stocks/i }));
+    await user.type(screen.getByLabelText('Symbol'), 'stk09');
+    await user.click(screen.getByRole('button', { name: /add to watchlist/i }));
+
+    await waitFor(() => expect(screen.getByText('Could not reach the backend.')).toBeInTheDocument());
+    expect(api.listWatchlists).toHaveBeenCalledTimes(1); // no recovery re-fetch for a plain network error
   });
 });

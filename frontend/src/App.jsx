@@ -5,9 +5,11 @@ import WatchlistToolbar from './components/WatchlistToolbar.jsx';
 import AttentionSection from './components/AttentionSection.jsx';
 import WatchlistTable from './components/WatchlistTable.jsx';
 import AddItemForm from './components/AddItemForm.jsx';
+import CreateWatchlistModal from './components/CreateWatchlistModal.jsx';
 import { LoadingState, ErrorState, EmptyState } from './components/StatusStates.jsx';
 import {
   listWatchlists,
+  listInstruments,
   createWatchlist,
   getWatchlist,
   checkWatchlist,
@@ -24,6 +26,7 @@ export default function App() {
   const [watchlist, setWatchlist] = useState(null);
   const [detectedItems, setDetectedItems] = useState([]);
   const [attentionItems, setAttentionItems] = useState([]);
+  const [instruments, setInstruments] = useState([]);
 
   const [loadingSummaries, setLoadingSummaries] = useState(true);
   const [loadingWatchlist, setLoadingWatchlist] = useState(false);
@@ -32,7 +35,9 @@ export default function App() {
   const [watchlistError, setWatchlistError] = useState(null);
   const [attentionError, setAttentionError] = useState(null);
 
+  const [createModalOpen, setCreateModalOpen] = useState(false);
   const [creatingWatchlist, setCreatingWatchlist] = useState(false);
+  const [createError, setCreateError] = useState(null);
   const [checking, setChecking] = useState(false);
   const [checkSummary, setCheckSummary] = useState(null);
 
@@ -41,6 +46,7 @@ export default function App() {
   const [addError, setAddError] = useState(null);
   const [addSuccess, setAddSuccess] = useState(null);
   const [prefillSymbol, setPrefillSymbol] = useState('');
+  const [prefillInstrumentType, setPrefillInstrumentType] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [removingSymbol, setRemovingSymbol] = useState(null);
   const [tableSearch, setTableSearch] = useState('');
@@ -67,6 +73,24 @@ export default function App() {
       }
     }
     init();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Full stock/fund reference list for the global search — fetched once,
+  // filtered client-side per keystroke (see AppHeader.jsx). Failure here is
+  // non-fatal: the rest of the app works fine, global search just quietly
+  // has nothing to show until a retry (e.g. next reload).
+  useEffect(() => {
+    let cancelled = false;
+    listInstruments()
+      .then((data) => {
+        if (!cancelled) setInstruments(data);
+      })
+      .catch(() => {
+        // supplementary data only — no error state needed for this
+      });
     return () => {
       cancelled = true;
     };
@@ -117,19 +141,55 @@ export default function App() {
     loadInsights(selectedId);
   }, [selectedId, loadWatchlist, loadInsights]);
 
-  async function handleCreateWatchlist() {
+  // "+ Watchlist" (and the empty-state "Create watchlist" button) now open
+  // a naming dialog instead of silently creating "My Watchlist" — see
+  // CreateWatchlistModal. Nothing is created until the user confirms there.
+  function handleOpenCreateModal() {
+    setCreateError(null);
+    setCreateModalOpen(true);
+  }
+
+  function handleCancelCreateModal() {
+    if (creatingWatchlist) return; // don't let an overlay click abandon an in-flight request
+    setCreateModalOpen(false);
+  }
+
+  async function handleConfirmCreateWatchlist(name) {
     setCreatingWatchlist(true);
-    setListError(null);
+    setCreateError(null);
     try {
-      const created = await createWatchlist();
+      const created = await createWatchlist(name);
       setSummaries((prev) => [...prev, { ...created, itemCount: 0 }]);
       setSelectedId(created.id);
+      setCreateModalOpen(false);
     } catch (err) {
-      setListError(err.message);
+      setCreateError(err.message);
     } finally {
       setCreatingWatchlist(false);
     }
   }
+
+  // Belt-and-suspenders recovery for Issue 3 (stale watchlist ids): if an
+  // action against the currently-selected watchlist comes back 404, the id
+  // we're holding no longer exists on the backend — most likely deleted
+  // outside this session (another tab, direct API testing, etc.), since the
+  // app's own delete flow already keeps selectedId/summaries in sync. This
+  // re-syncs the tab list and drops the dead selection so a stale id can't
+  // be used for a subsequent action. Only runs on an actual 404, so it adds
+  // no extra requests during normal use.
+  const recoverFromStaleWatchlist = useCallback(async (err, staleId) => {
+    if (err?.status !== 404) return;
+    try {
+      const fresh = await listWatchlists();
+      setSummaries(fresh);
+      setSelectedId((prev) => {
+        if (prev !== staleId) return prev; // selection already moved on elsewhere; don't fight it
+        return fresh.some((w) => w.id === staleId) ? prev : fresh[0]?.id ?? null;
+      });
+    } catch {
+      // best-effort recovery only — leave the original error visible either way
+    }
+  }, []);
 
   // The explicit, deliberate "I'm checking now" action.
   async function handleCheck() {
@@ -152,6 +212,7 @@ export default function App() {
     } catch (err) {
       setCheckSummary(null);
       setAttentionError(err.message);
+      await recoverFromStaleWatchlist(err, selectedId);
     } finally {
       setChecking(false);
     }
@@ -159,16 +220,19 @@ export default function App() {
 
   async function handleAddItem(symbol, instrumentType) {
     if (selectedId == null) return;
+    const targetId = selectedId;
     setAddSubmitting(true);
     setAddError(null);
     setAddSuccess(null);
     try {
-      await addItem(selectedId, symbol, instrumentType);
+      await addItem(targetId, symbol, instrumentType);
       setAddSuccess(`${symbol.toUpperCase()} added to your watchlist.`);
       setPrefillSymbol('');
-      await Promise.all([loadWatchlist(selectedId), loadInsights(selectedId)]);
+      setPrefillInstrumentType('');
+      await Promise.all([loadWatchlist(targetId), loadInsights(targetId)]);
     } catch (err) {
       setAddError(err.message);
+      await recoverFromStaleWatchlist(err, targetId);
     } finally {
       setAddSubmitting(false);
     }
@@ -176,12 +240,14 @@ export default function App() {
 
   async function handleRemoveItem(symbol) {
     if (selectedId == null) return;
+    const targetId = selectedId;
     setRemovingSymbol(symbol);
     try {
-      await removeItem(selectedId, symbol);
-      await Promise.all([loadWatchlist(selectedId), loadInsights(selectedId)]);
+      await removeItem(targetId, symbol);
+      await Promise.all([loadWatchlist(targetId), loadInsights(targetId)]);
     } catch (err) {
       setWatchlistError(err.message);
+      await recoverFromStaleWatchlist(err, targetId);
     } finally {
       setRemovingSymbol(null);
     }
@@ -220,9 +286,13 @@ export default function App() {
     }
   }
 
-  function handleGlobalSearch(query) {
+  // Picking a result from the global instrument search (AppHeader) opens
+  // the add form prefilled with that instrument — it does NOT add anything
+  // by itself. Adding still requires the explicit "Add to watchlist" click.
+  function handleSelectInstrument(instrument) {
     setAddOpen(true);
-    setPrefillSymbol(query.toUpperCase());
+    setPrefillSymbol(instrument.symbol);
+    setPrefillInstrumentType(instrument.instrumentType);
     addSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
@@ -242,7 +312,15 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <AppHeader onGlobalSearch={handleGlobalSearch} />
+      <AppHeader instruments={instruments} onSelectInstrument={handleSelectInstrument} />
+
+      <CreateWatchlistModal
+        open={createModalOpen}
+        submitting={creatingWatchlist}
+        error={createError}
+        onCancel={handleCancelCreateModal}
+        onConfirm={handleConfirmCreateWatchlist}
+      />
 
       <main className="page">
         {loadingSummaries && <LoadingState label="Loading your watchlists…" />}
@@ -254,7 +332,7 @@ export default function App() {
         {!loadingSummaries && !listError && summaries.length === 0 && (
           <div className="wl-panel">
             <EmptyState title="No watchlist yet" message="Create one to start tracking instruments." />
-            <button type="button" className="btn btn--primary" onClick={handleCreateWatchlist}>
+            <button type="button" className="btn btn--primary" onClick={handleOpenCreateModal}>
               Create watchlist
             </button>
           </div>
@@ -266,7 +344,7 @@ export default function App() {
               watchlists={summaries}
               selectedId={selectedId}
               onSelect={setSelectedId}
-              onCreate={handleCreateWatchlist}
+              onCreate={handleOpenCreateModal}
               creating={creatingWatchlist}
             />
 
@@ -313,6 +391,7 @@ export default function App() {
                     error={addError}
                     success={addSuccess}
                     prefillSymbol={prefillSymbol}
+                    prefillInstrumentType={prefillInstrumentType}
                   />
                 </div>
               )}

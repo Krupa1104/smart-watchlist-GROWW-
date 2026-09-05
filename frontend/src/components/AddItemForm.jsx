@@ -1,12 +1,27 @@
 import { useEffect, useState } from 'react';
 
-export default function AddItemForm({ onAdd, submitting, error, success, prefillSymbol }) {
+export default function AddItemForm({
+  onAdd,
+  submitting,
+  error,
+  success,
+  prefillSymbol,
+  prefillInstrumentType,
+}) {
   const [symbol, setSymbol] = useState(prefillSymbol || '');
-  const [instrumentType, setInstrumentType] = useState('STOCK');
+  const [instrumentType, setInstrumentType] = useState(prefillInstrumentType || 'STOCK');
 
   useEffect(() => {
     if (prefillSymbol) setSymbol(prefillSymbol);
   }, [prefillSymbol]);
+
+  // Set together with prefillSymbol when a global search result is picked,
+  // so e.g. selecting a FUND result doesn't leave the type dropdown on the
+  // default STOCK — but only when the parent actually specifies one, so
+  // typing into the plain "Symbol" field never resets the user's own choice.
+  useEffect(() => {
+    if (prefillInstrumentType) setInstrumentType(prefillInstrumentType);
+  }, [prefillInstrumentType]);
 
   function handleSubmit(e) {
     e.preventDefault();
