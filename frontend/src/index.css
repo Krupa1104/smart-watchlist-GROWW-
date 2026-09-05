@@ -1005,3 +1005,59 @@ body {
     width: 100vw;
   }
 }
+
+/* ---------- Feature 5: simulated live feed ---------- */
+.wl-toolbar__live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--positive);
+  background: var(--positive-bg);
+  padding: 0.15rem 0.55rem;
+  border-radius: 10px;
+  margin-left: 0.6rem;
+}
+.wl-toolbar__live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--positive);
+  display: inline-block;
+  animation: live-pulse 1.4s ease-in-out infinite;
+}
+.wl-table__live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--positive);
+  display: inline-block;
+  margin-left: 0.4rem;
+  animation: live-pulse 1.4s ease-in-out infinite;
+}
+.detail-panel__live-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--positive);
+  background: var(--positive-bg);
+  padding: 0.1rem 0.45rem;
+  border-radius: 10px;
+}
+.detail-panel__chart--live .detail-panel__chart-line--live {
+  stroke: var(--positive);
+}
+@keyframes live-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wl-toolbar__live-dot,
+  .wl-table__live-dot {
+    animation: none;
+  }
+}

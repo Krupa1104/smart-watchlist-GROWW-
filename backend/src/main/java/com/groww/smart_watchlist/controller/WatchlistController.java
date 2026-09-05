@@ -12,8 +12,10 @@ import com.groww.smart_watchlist.dto.WatchlistSummaryResponse;
 import com.groww.smart_watchlist.service.WatchlistService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -75,6 +77,18 @@ public class WatchlistController {
             @PathVariable Integer watchlistId,
             @RequestParam Integer userId) {
         return watchlistService.detectChanges(watchlistId, userId);
+    }
+
+    // DEMO simulated intraday feed (Feature 5) — see TickSimulationService.
+    // One SSE connection per active watchlist page; the frontend opens this
+    // exactly once per selected watchlist and closes it on unmount/switch.
+    // Same ownership check as every other endpoint here, so a stale/foreign
+    // watchlistId can't be subscribed to either.
+    @GetMapping(value = "/{watchlistId}/live", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamLiveTicks(
+            @PathVariable Integer watchlistId,
+            @RequestParam Integer userId) {
+        return watchlistService.subscribeToLiveTicks(watchlistId, userId);
     }
 
     // The actual "what deserves my attention" digest — meaningful changes

@@ -11,6 +11,7 @@ export default function WatchlistToolbar({
   checking,
   onDeleteWatchlist,
   deletingWatchlist,
+  liveFeedActive,
 }) {
   return (
     <div className="wl-toolbar">
@@ -29,6 +30,12 @@ export default function WatchlistToolbar({
           {itemCount} {itemCount === 1 ? 'instrument' : 'instruments'}
           {dataAsOf && <> · data as of {dataAsOf}</>}
         </span>
+        {liveFeedActive && (
+          <span className="wl-toolbar__live-badge" title="Prices tick in-app for demo purposes — not a real market feed">
+            <span className="wl-toolbar__live-dot" aria-hidden="true" />
+            Simulated live data
+          </span>
+        )}
       </div>
 
       <div className="wl-toolbar__right">

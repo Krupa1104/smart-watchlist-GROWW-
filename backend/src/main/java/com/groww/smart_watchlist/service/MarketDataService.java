@@ -18,6 +18,8 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import java.math.BigDecimal;
 
 // Deliberately the only place in the app that knows "STOCK reads from
 // stock_prices, FUND reads from fund_navs". WatchlistService just asks this
@@ -36,15 +38,18 @@ public class MarketDataService {
     private final FundRepository fundRepository;
     private final StockPriceRepository stockPriceRepository;
     private final FundNavRepository fundNavRepository;
+    private final TickSimulationService tickSimulationService;
 
     public MarketDataService(StockRepository stockRepository,
                               FundRepository fundRepository,
                               StockPriceRepository stockPriceRepository,
-                              FundNavRepository fundNavRepository) {
+                              FundNavRepository fundNavRepository,
+                              TickSimulationService tickSimulationService) {
         this.stockRepository = stockRepository;
         this.fundRepository = fundRepository;
         this.stockPriceRepository = stockPriceRepository;
         this.fundNavRepository = fundNavRepository;
+        this.tickSimulationService = tickSimulationService;
     }
 
     /**
@@ -107,18 +112,31 @@ public class MarketDataService {
                 .toList();
     }
 
+    // Feature 5: `latestValue` here is now the SIMULATED current price (see
+    // TickSimulationService), not always the raw DB close. This is the one
+    // seam that makes checkWatchlist()/the watchlist table/the detail panel
+    // all reflect the simulated feed automatically, with zero changes to
+    // SnapshotService, WatchlistService's check/detect flow, or
+    // ChangeDetectionService (which reads stock_prices/fund_navs directly
+    // and never calls this method) — anomaly detection and "1D change"
+    // stay pinned to the real historical daily close, exactly as before.
+    // On the very first call for a symbol, before any tick has run, this
+    // equals the real close/NAV exactly (see TickSimulationService's
+    // seeding) — nothing looks different until simulation has actually
+    // had a chance to move it.
     private MarketDataResponse getLatestStockData(String symbol) {
         Stock stock = stockRepository.findById(symbol)
                 .orElseThrow(() -> new ResourceNotFoundException("Stock not found: " + symbol));
 
-        return stockPriceRepository.findTopBySymbolOrderByTradeDateDesc(symbol)
+        Optional<BigDecimal> simulatedPrice = tickSimulationService.getCurrentPrice(symbol, InstrumentType.STOCK);
+        return simulatedPrice
                 .map(price -> new MarketDataResponse(
                         symbol,
                         InstrumentType.STOCK,
                         stock.getName(),
                         stock.getSector(),
-                        price.getClose(),
-                        price.getTradeDate(),
+                        price,
+                        tickSimulationService.getAsOfDate(symbol, InstrumentType.STOCK).orElse(null),
                         true
                 ))
                 // Symbol is real but has no price rows yet — surface that
@@ -133,14 +151,15 @@ public class MarketDataService {
         Fund fund = fundRepository.findById(symbol)
                 .orElseThrow(() -> new ResourceNotFoundException("Fund not found: " + symbol));
 
-        return fundNavRepository.findTopBySymbolOrderByNavDateDesc(symbol)
-                .map(nav -> new MarketDataResponse(
+        Optional<BigDecimal> simulatedPrice = tickSimulationService.getCurrentPrice(symbol, InstrumentType.FUND);
+        return simulatedPrice
+                .map(price -> new MarketDataResponse(
                         symbol,
                         InstrumentType.FUND,
                         fund.getName(),
                         fund.getCategory(),
-                        nav.getNav(),
-                        nav.getNavDate(),
+                        price,
+                        tickSimulationService.getAsOfDate(symbol, InstrumentType.FUND).orElse(null),
                         true
                 ))
                 .orElseGet(() -> new MarketDataResponse(

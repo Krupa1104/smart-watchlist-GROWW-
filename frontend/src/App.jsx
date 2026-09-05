@@ -22,6 +22,7 @@ import {
   removeItem,
   deleteWatchlist,
 } from './api/watchlistApi.js';
+import { subscribeToLiveTicks } from './api/liveFeed.js';
 
 export default function App() {
   const [summaries, setSummaries] = useState([]);
@@ -45,6 +46,7 @@ export default function App() {
   const [checkSummary, setCheckSummary] = useState(null);
   const [checkDiffs, setCheckDiffs] = useState([]);
   const [detailSymbol, setDetailSymbol] = useState(null);
+  const [liveValues, setLiveValues] = useState(new Map());
 
   const [addOpen, setAddOpen] = useState(false);
   const [addSubmitting, setAddSubmitting] = useState(false);
@@ -100,6 +102,28 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  // Feature 5: DEMO simulated intraday feed — exactly ONE SSE connection
+  // per active watchlist, opened here (not in a child component) so it
+  // can never be accidentally duplicated by e.g. the detail panel mounting
+  // its own. Reset the displayed live values and (re)subscribe whenever
+  // the selected watchlist changes; the returned cleanup function closes
+  // the previous EventSource before React ever opens a new one, and also
+  // runs on unmount.
+  useEffect(() => {
+    setLiveValues(new Map());
+    if (selectedId == null) return undefined;
+    const unsubscribe = subscribeToLiveTicks(selectedId, (batch) => {
+      setLiveValues((prev) => {
+        const next = new Map(prev);
+        batch.forEach((t) => {
+          next.set(t.symbol, { value: t.value, asOfDate: t.asOfDate, instrumentType: t.instrumentType });
+        });
+        return next;
+      });
+    });
+    return unsubscribe;
+  }, [selectedId]);
 
   const loadWatchlist = useCallback(async (id) => {
     setLoadingWatchlist(true);
@@ -406,6 +430,7 @@ export default function App() {
                 checking={checking}
                 onDeleteWatchlist={handleDeleteWatchlist}
                 deletingWatchlist={deletingWatchlist}
+                liveFeedActive={liveValues.size > 0}
               />
 
               {deleteError && (
@@ -441,6 +466,7 @@ export default function App() {
                   onRemove={handleRemoveItem}
                   removingSymbol={removingSymbol}
                   onSelectInstrument={handleOpenDetail}
+                  liveValues={liveValues}
                 />
               )}
             </section>
@@ -453,6 +479,7 @@ export default function App() {
           watchlistId={selectedId}
           symbol={detailSymbol}
           onClose={handleCloseDetail}
+          liveValue={liveValues.get(detailSymbol)}
         />
       )}
     </div>

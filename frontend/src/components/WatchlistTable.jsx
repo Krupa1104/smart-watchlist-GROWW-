@@ -10,6 +10,7 @@ export default function WatchlistTable({
   onRemove,
   removingSymbol,
   onSelectInstrument,
+  liveValues,
 }) {
   if (totalCount === 0) {
     return (
@@ -45,6 +46,13 @@ export default function WatchlistTable({
           const direction = directionFromPercent(pct);
           const volumeRatio = detected ? getVolumeRatio(detected.metrics) : null;
           const flagged = attentionSymbols.has(item.symbol);
+          // Feature 5: prefer the live simulated tick for display when one
+          // has arrived — falls back to the value fetched on page load
+          // otherwise. Note "1D change" above stays keyed off `detected`
+          // (real historical daily data), completely untouched by this —
+          // the displayed price ticks, the anomaly/% column does not.
+          const live = liveValues?.get(item.symbol);
+          const displayValue = live?.value ?? md?.latestValue;
 
           return (
             <tr
@@ -74,7 +82,8 @@ export default function WatchlistTable({
               </td>
               <td>{md?.groupLabel ?? '—'}</td>
               <td className="wl-table__num wl-table__value">
-                {md?.dataAvailable ? formatPrice(md.latestValue, item.instrumentType) : 'No data'}
+                {md?.dataAvailable ? formatPrice(displayValue, item.instrumentType) : 'No data'}
+                {live && <span className="wl-table__live-dot" aria-hidden="true" title="Simulated live update" />}
               </td>
               <td className={`wl-table__num wl-table__change wl-table__change--${direction ?? 'flat'}`}>
                 {pct === null ? '—' : `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`}

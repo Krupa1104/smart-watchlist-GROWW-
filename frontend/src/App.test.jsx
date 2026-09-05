@@ -1,10 +1,25 @@
-import { render, screen, waitFor, cleanup, within } from '@testing-library/react';
+import { render, screen, waitFor, cleanup, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import App from './App.jsx';
 import * as api from './api/watchlistApi.js';
+import * as liveFeedApi from './api/liveFeed.js';
 
 vi.mock('./api/watchlistApi.js');
+vi.mock('./api/liveFeed.js');
+
+// Captures every subscribeToLiveTicks(watchlistId, onBatch) call so tests
+// can both assert on the call itself and manually fire onBatch to simulate
+// an incoming SSE tick — no real EventSource needed (jsdom has none).
+function setupLiveFeedMock() {
+  const calls = [];
+  liveFeedApi.subscribeToLiveTicks.mockImplementation((watchlistId, onBatch) => {
+    const unsubscribe = vi.fn();
+    calls.push({ watchlistId, onBatch, unsubscribe });
+    return unsubscribe;
+  });
+  return calls;
+}
 
 const SUMMARIES = [{ id: 1, name: 'My Watchlist', createdAt: '2026-08-24T10:00:00Z', itemCount: 2 }];
 
@@ -788,5 +803,122 @@ describe('App — instrument detail panel', () => {
     await waitFor(() => expect(api.removeItem).toHaveBeenCalled());
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(api.getInstrumentDetail).not.toHaveBeenCalled();
+  });
+});
+
+describe('App — Feature 5: simulated live feed', () => {
+  it('subscribes to the live feed exactly once for the active watchlist', async () => {
+    setupDefaultMocks();
+    const liveCalls = setupLiveFeedMock();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+
+    expect(liveFeedApi.subscribeToLiveTicks).toHaveBeenCalledTimes(1);
+    expect(liveCalls[0].watchlistId).toBe(1);
+  });
+
+  it('closes the previous subscription and opens exactly one new one when switching watchlists', async () => {
+    setupDefaultMocks({
+      summaries: [
+        { id: 1, name: 'My Watchlist', createdAt: '2026-08-24T10:00:00Z', itemCount: 2 },
+        { id: 3, name: 'Second List', createdAt: '2026-08-24T10:00:00Z', itemCount: 0 },
+      ],
+    });
+    const liveCalls = setupLiveFeedMock();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    expect(liveFeedApi.subscribeToLiveTicks).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByText('Second List'));
+
+    await waitFor(() => expect(liveFeedApi.subscribeToLiveTicks).toHaveBeenCalledTimes(2));
+    expect(liveCalls[0].unsubscribe).toHaveBeenCalledTimes(1); // the FIRST (watchlist 1) subscription was closed
+    expect(liveCalls[1].watchlistId).toBe(3); // exactly one new subscription, for the new watchlist
+  });
+
+  it('closes the SSE subscription when the app unmounts', async () => {
+    setupDefaultMocks();
+    const liveCalls = setupLiveFeedMock();
+    const { unmount } = render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    expect(liveCalls[0].unsubscribe).not.toHaveBeenCalled();
+
+    unmount();
+    expect(liveCalls[0].unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates the displayed table price when a simulated tick arrives, without touching the 1D change column', async () => {
+    setupDefaultMocks();
+    const liveCalls = setupLiveFeedMock();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    // STK01 starts at ₹3,570.50 (WATCHLIST fixture) with a +9.10% 1D change (DETECTED fixture)
+    expect(screen.getByText('+9.10%')).toBeInTheDocument();
+
+    act(() => {
+      liveCalls[0].onBatch([
+        { symbol: 'STK01', instrumentType: 'STOCK', value: 3601.25, asOfDate: '2026-08-24', simulated: true },
+      ]);
+    });
+
+    await waitFor(() => expect(screen.getByText(/3,601\.25/)).toBeInTheDocument());
+    // the anomaly/"1D change" figure must be completely unaffected by the tick
+    expect(screen.getByText('+9.10%')).toBeInTheDocument();
+  });
+
+  it('shows the "Simulated live data" badge only after the first tick arrives', async () => {
+    setupDefaultMocks();
+    const liveCalls = setupLiveFeedMock();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.queryByText(/simulated live data/i)).not.toBeInTheDocument();
+
+    act(() => {
+      liveCalls[0].onBatch([{ symbol: 'STK01', instrumentType: 'STOCK', value: 3601.25, asOfDate: '2026-08-24' }]);
+    });
+
+    await waitFor(() => expect(screen.getByText(/simulated live data/i)).toBeInTheDocument());
+  });
+
+  it('shows a live price update in the open instrument detail panel', async () => {
+    setupDefaultMocks();
+    const liveCalls = setupLiveFeedMock();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    await user.click(screen.getByText('STK01'));
+    const dialog = await screen.findByRole('dialog', { name: /STK01/i });
+    await within(dialog).findByText('Acme Corp');
+
+    act(() => {
+      liveCalls[0].onBatch([
+        { symbol: 'STK01', instrumentType: 'STOCK', value: 3699.99, asOfDate: '2026-08-24' },
+      ]);
+    });
+
+    await waitFor(() => expect(within(dialog).getByText(/3,699\.99/)).toBeInTheDocument());
+    expect(within(dialog).getByText(/live/i)).toBeInTheDocument();
+  });
+
+  it('does not open a second SSE connection when the detail panel is opened', async () => {
+    setupDefaultMocks();
+    setupLiveFeedMock();
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText('STK01')).toBeInTheDocument(), { timeout: 3000 });
+    expect(liveFeedApi.subscribeToLiveTicks).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByText('STK01'));
+    await screen.findByRole('dialog', { name: /STK01/i });
+
+    expect(liveFeedApi.subscribeToLiveTicks).toHaveBeenCalledTimes(1); // still just the one, App-level connection
   });
 });

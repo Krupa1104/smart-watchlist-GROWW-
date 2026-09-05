@@ -22,6 +22,7 @@ import com.groww.smart_watchlist.repository.WatchlistItemRepository;
 import com.groww.smart_watchlist.repository.WatchlistRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.LocalDate;
 import java.util.Comparator;
@@ -39,6 +40,7 @@ public class WatchlistService {
     private final ChangeDetectionService changeDetectionService;
     private final EventCorrelationService eventCorrelationService;
     private final SuggestionService suggestionService;
+    private final TickSimulationService tickSimulationService;
 
     public WatchlistService(WatchlistRepository watchlistRepository,
                              WatchlistItemRepository watchlistItemRepository,
@@ -47,7 +49,8 @@ public class WatchlistService {
                              SnapshotService snapshotService,
                              ChangeDetectionService changeDetectionService,
                              EventCorrelationService eventCorrelationService,
-                             SuggestionService suggestionService) {
+                             SuggestionService suggestionService,
+                             TickSimulationService tickSimulationService) {
         this.watchlistRepository = watchlistRepository;
         this.watchlistItemRepository = watchlistItemRepository;
         this.userRepository = userRepository;
@@ -56,6 +59,7 @@ public class WatchlistService {
         this.changeDetectionService = changeDetectionService;
         this.eventCorrelationService = eventCorrelationService;
         this.suggestionService = suggestionService;
+        this.tickSimulationService = tickSimulationService;
     }
 
     @Transactional
@@ -172,6 +176,19 @@ public class WatchlistService {
         return items.stream()
                 .map(item -> changeDetectionService.detect(item.getSymbol(), item.getInstrumentType()))
                 .toList();
+    }
+
+    /**
+     * Backs the SSE live feed (Feature 5). Ownership check only — the
+     * subscription itself, its periodic updates, and its cleanup all live
+     * in TickSimulationService, which needs no other WatchlistService
+     * state (it re-reads the watchlist's items itself on every tick, since
+     * items can be added/removed while a subscription is open).
+     */
+    @Transactional(readOnly = true)
+    public SseEmitter subscribeToLiveTicks(Integer watchlistId, Integer userId) {
+        loadOwnedWatchlist(watchlistId, userId);
+        return tickSimulationService.subscribe(watchlistId);
     }
 
     /**
