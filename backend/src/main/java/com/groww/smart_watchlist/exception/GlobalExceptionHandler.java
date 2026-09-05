@@ -1,5 +1,7 @@
 package com.groww.smart_watchlist.exception;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +15,8 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleNotFound(ResourceNotFoundException ex) {
@@ -53,6 +57,22 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Map<String, Object>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
         return build(HttpStatus.CONFLICT, "This request conflicts with another change made at the same time. Please retry.");
+    }
+
+    // Catch-all for anything not mapped above — every specific handler above
+    // still wins for its own exception type (Spring dispatches to the most
+    // specific matching @ExceptionHandler first), so this only ever fires
+    // for a genuinely unexpected failure. Without this, such a failure would
+    // reach the client as a raw framework 500 body, which can include stack
+    // trace / internal implementation details. This handler logs the real
+    // exception server-side (for debugging) but only ever returns the same
+    // generic, no-detail message to the client — deliberately vague on
+    // purpose, not a bug.
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Map<String, Object>> handleUnexpected(Exception ex) {
+        log.error("Unhandled exception while processing request", ex);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR,
+                "An unexpected error occurred. Please try again.");
     }
 
     private ResponseEntity<Map<String, Object>> build(HttpStatus status, String message) {

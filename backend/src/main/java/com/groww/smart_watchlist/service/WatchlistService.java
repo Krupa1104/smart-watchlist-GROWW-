@@ -172,18 +172,43 @@ public class WatchlistService {
      * then correctly reads the first's just-written value as its own
      * "previous", rather than a stale read taken before either wrote. See
      * WatchlistItemRepository.findByIdForUpdate and SnapshotConcurrencyTest.
+     * All items are locked, in the same per-item order as before, BEFORE any
+     * market data is fetched — since findByIdForUpdate's row lock is held
+     * for the whole enclosing transaction regardless of when later reads
+     * happen, moving the market-data fetch after the locking loop changes
+     * nothing about how/when concurrent callers serialize; it only changes
+     * how many market-data queries are issued.
+     *
+     * Market data for every locked item is fetched in the SAME batched call
+     * getWatchlist()/detectChanges() already use (fetchMarketDataBatch —
+     * two queries total, stocks then funds, regardless of watchlist size)
+     * instead of one marketDataService.getLatestMarketData() call per item,
+     * closing the one remaining N+1 in this class. A symbol that batch
+     * lookup can't resolve (see MarketDataService.getLatestMarketDataBatch's
+     * own defensive null-check — should never happen for a real watchlist
+     * item, but isn't impossible if data drifts) falls back to the original
+     * single-item lookup for just that item, so behavior for that edge case
+     * is unchanged from before this refactor.
      */
     @Transactional
     public List<SnapshotDiffResponse> checkWatchlist(Integer watchlistId, Integer userId) {
         loadOwnedWatchlist(watchlistId, userId);
         List<WatchlistItem> items = watchlistItemRepository.findByWatchlistId(watchlistId);
 
-        return items.stream()
-                .map(item -> {
-                    WatchlistItem lockedItem = watchlistItemRepository.findByIdForUpdate(item.getId())
-                            .orElse(item); // deleted concurrently mid-check — fall back rather than NPE
-                    MarketDataResponse marketData =
-                            marketDataService.getLatestMarketData(lockedItem.getSymbol(), lockedItem.getInstrumentType());
+        List<WatchlistItem> lockedItems = items.stream()
+                .map(item -> watchlistItemRepository.findByIdForUpdate(item.getId())
+                        .orElse(item)) // deleted concurrently mid-check — fall back rather than NPE
+                .toList();
+
+        Map<String, MarketDataResponse> marketDataBySymbol = fetchMarketDataBatch(lockedItems);
+
+        return lockedItems.stream()
+                .map(lockedItem -> {
+                    MarketDataResponse marketData = marketDataBySymbol.get(lockedItem.getSymbol());
+                    if (marketData == null) {
+                        marketData = marketDataService.getLatestMarketData(
+                                lockedItem.getSymbol(), lockedItem.getInstrumentType());
+                    }
                     return snapshotService.recordCheck(lockedItem, marketData);
                 })
                 .toList();
